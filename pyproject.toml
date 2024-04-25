@@ -1,0 +1,151 @@
+[tool.poetry]
+name = "scales"
+version = "0.1.0"
+description = "Experiment repository for LLM scaling and HPO studies"
+authors = ["Samir Garibov <karibbov@gmail.com>", "Tarek Abou Chakra <tarek.abouchakra@hotmail.com>", "Neeratyoy Mallik <mallik@cs.uni-freiburg.de>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8, <3.12"
+# Poetry insists on this https://github.com/python-poetry/poetry/issues/8823
+boto3 = "1.34.84"
+litgpt = {version = "^0.3.0", extras = ["all"]}
+#neural-pipeline-search = "^0.11.1"
+#Neps needs to be either locally installed or from git due to the torch conflict
+neural-pipeline-search = {path = "../neps", develop = true}
+
+#litgpt = {path = "../litgpt", extras = ["all"], develop = true}
+#lm_eval = {path = "../lm-evaluation-harness", develop = true}
+
+
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^3"
+mypy = "^1"
+pytest = "^7"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+# Copied over from litdata pyproject.toml
+# Needs updates
+[tool.black]
+line-length = 120
+
+[tool.docformatter]
+recursive = true
+# this need to be shorter as some docstings are r"""...
+wrap-summaries = 119
+wrap-descriptions = 120
+blank = true
+
+# [tool.codespell]
+# Todo: enable also python files in a next step
+# skip = '*.py'
+# quiet-level = 3
+# comma separated list of words; waiting for:
+#  https://github.com/codespell-project/codespell/issues/2839#issuecomment-1731601603
+# also adding links until they ignored by its: nature
+#  https://github.com/codespell-project/codespell/issues/2243#issuecomment-1732019960
+# ignore-words-list = "te, compiletime"
+
+
+[tool.ruff]
+line-length = 120
+# Enable Pyflakes `E` and `F` codes by default.
+lint.select = [
+    "E", "W",  # see: https://pypi.org/project/pycodestyle
+    "F",  # see: https://pypi.org/project/pyflakes
+    "S",  # see: https://pypi.org/project/flake8-bandit
+    "RUF018",  # see: https://docs.astral.sh/ruff/rules/assignment-in-assert
+]
+lint.extend-select = [
+    "I",  # see: isort
+    "C4",  # see: https://pypi.org/project/flake8-comprehensions
+    "SIM",  # see: https://pypi.org/project/flake8-simplify
+    "RET",  # see: https://pypi.org/project/flake8-return
+    "PT",  # see: https://pypi.org/project/flake8-pytest-style
+    "RUF100" # yesqa
+]
+lint.ignore = [
+    "E731",  # Do not assign a lambda expression, use a def
+    "S108",
+    "E203", # conflicts with black
+]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".git",
+    "docs",
+    "data",
+    ".github",
+    ".idea"
+]
+lint.ignore-init-module-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+".actions/*" = ["S101", "S310"]
+"setup.py" = ["S101", "SIM115"]
+"scales/**" = [
+    "S101",  # todo: Use of `assert` detected
+    "S403",  # todo: `pickle`, `cPickle`, `dill`, and `shelve` modules are possibly insecure
+    "S404",  # todo: `subprocess` module is possibly insecure
+    "S602",  # todo: `subprocess` call with `shell=True` identified, security issue
+    "S603",  # todo: `subprocess` call: check for execution of untrusted input
+    "S605",  # todo: Starting a process with a shell: seems safe, but may be changed in the future; consider rewriting without `shell`
+    "S607",  # todo: Starting a process with a partial executable path
+    "S310",  # todo: Audit URL open for permitted schemes. Allowing use of `file:` or custom schemes is often unexpected.
+]
+"tests/**" = [
+    "S101",  # Use of `assert` detected
+    "S105", "S106",  # todo: Possible hardcoded password: ...
+    "S301",  # `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+    "S113",  # todo: Probable use of requests call without timeout
+    "S311",  # todo: Standard pseudo-random generators are not suitable for cryptographic purposes
+    "S108",  # todo: Probable insecure usage of temporary file or directory: "/tmp/sys-customizations-sync"
+    "S202",  # Uses of `tarfile.extractall()`
+    "S403",  # `pickle`, `cPickle`, `dill`, and `shelve` modules are possibly insecure
+    "S404",  # `subprocess` module is possibly insecure
+    "S602",  # todo: `subprocess` call with `shell=True` identified, security issue
+    "S603",  # todo: `subprocess` call: check for execution of untrusted input
+    "S605",  # todo: Starting a process with a shell: seems safe, but may be changed in the future; consider rewriting without `shell`
+    "S607",  # todo: Starting a process with a partial executable path
+]
+
+[tool.ruff.lint.mccabe]
+# Unlike Flake8, default to a complexity level of 10.
+max-complexity = 10
+
+
+[tool.mypy]
+files = [
+    "scales",
+]
+# This section is for folders with "-" as they are not valid python modules
+exclude = [
+]
+install_types = true
+non_interactive = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+show_error_codes = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+allow_redefinition = true
+# disable this rule as the Trainer attributes are defined in the connectors, not in its __init__
+disable_error_code = "attr-defined"
+# style choices
+warn_no_return = true
+
+# Ignore mypy errors for these files
+# TODO: the goal is for this to be empty
+[[tool.mypy.overrides]]
+# the list can be generated with:
+# mypy --no-error-summary 2>&1 | tr ':' ' ' | awk '{print $1}' | sort | uniq | sed 's/\.py//g; s|src/||g;  s|\/|\.|g' | xargs -I {} echo '"{}",'
+module = [
+]
+ignore_errors = true
