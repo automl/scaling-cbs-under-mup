@@ -51,7 +51,7 @@ def tokenize_wikitext(index: int, dataset: Dataset, tokenizer: Tokenizer, prep_f
     """Tokenize each row in the dataset separately."""
     # only yield for now due to a bug on litdata
     # https://github.com/Lightning-AI/litdata/issues/70
-    return tokenizer.encode(prep_fn(dataset[index]), eos=True)
+    yield tokenizer.encode(prep_fn(dataset[index]), eos=True)
 
 
 # def tokenize_text() -> None:
@@ -119,6 +119,8 @@ class DataHandler:
     """Use optimized data reading for the `StreamingDataset` if the dataset is an nlp dataset."""
     batch_size: int = 64
     """Batch size for `StreamingDataLoader` (same for all splits)"""
+    block_size: int = 2048
+    """Block size in each batch"""
     num_workers: int = 1
     """Number of workers for `StreamingDataLoader`"""
 
@@ -208,7 +210,7 @@ class DataHandler:
         if self.nlp_dataset:
             from litdata.streaming.item_loader import TokensLoader
 
-            item_loader = TokensLoader(block_size=2048 + 1)
+            item_loader = TokensLoader(block_size=self.block_size + 1)
 
         for split in self.splits:
             self.datasets[split] = StreamingDataset(

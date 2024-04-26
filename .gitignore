@@ -55,6 +55,12 @@ coverage.xml
 *.mo
 *.pot
 
+# Data files
+data/
+
+# Poetry Lock
+poetry.lock
+
 # Django stuff:
 *.log
 local_settings.py
