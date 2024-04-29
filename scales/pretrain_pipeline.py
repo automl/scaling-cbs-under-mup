@@ -140,6 +140,8 @@ def train(
     for batch in train_iterator:
         if max_train_steps is not None and states["train_steps"] >= max_train_steps:
             break
+        if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
+            break
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
@@ -169,9 +171,6 @@ def train(
             )
             fabric.print(f"Validation Loss: {val_loss}")
 
-        if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
-            break
-
         states["train_steps"] += 1
 
     final_val_loss = validate(
@@ -197,6 +196,7 @@ def validate(
     fabric.barrier()
     model.eval()
 
+    step = 0
     val_losses = []
     for step, batch in enumerate(val_dataloader):
         if max_val_steps and step >= max_val_steps:
@@ -209,6 +209,9 @@ def validate(
 
         loss = nn.functional.cross_entropy(logits, targets)
         val_losses.append(loss)
+    else:
+        # if no break is taken
+        fabric.print(f"Validation data is exhausted in {step} steps")
 
     val_loss = torch.stack(val_losses).mean()
     model.train()
