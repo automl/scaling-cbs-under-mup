@@ -55,8 +55,10 @@ coverage.xml
 *.mo
 *.pot
 
-# Data files
+# Generated files
 data/
+result/
+output/
 
 # Poetry Lock
 poetry.lock

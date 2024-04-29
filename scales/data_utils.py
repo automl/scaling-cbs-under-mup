@@ -120,7 +120,7 @@ class DataHandler:
     batch_size: int = 64
     """Batch size for `StreamingDataLoader` (same for all splits)"""
     block_size: int = 2048
-    """Block size in each batch"""
+    """Block size in each batch."""
     num_workers: int = 1
     """Number of workers for `StreamingDataLoader`"""
 
@@ -217,7 +217,7 @@ class DataHandler:
                 input_dir=str(self.binary_path / split), item_loader=item_loader, shuffle=True, seed=self.seed
             )
 
-    def load_data_laoders(self) -> None:
+    def load_data_loaders(self) -> None:
         """Loads the `StreamingDataLoaders` into `self.data_loaders` dict, keys are `splits`"""
         self.__convert_to_binary()
         self.__load_datasets()

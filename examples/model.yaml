@@ -1,0 +1,8 @@
+bias: true
+block_size: 64
+n_embd: 32
+n_head: 2
+n_layer: 3
+n_query_groups: 2
+norm_class_name: LayerNorm
+vocab_size: 50257
