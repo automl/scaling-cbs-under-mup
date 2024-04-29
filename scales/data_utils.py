@@ -1,18 +1,14 @@
-# TODO: (in the case no pre-processing is necessary)
-#   1. Download a Dataset (for git clone from hf do them manually)
-#   2. Pre-process the dataset (functional)
-#   3. optimize the dataset (convert + tokenize)
-#   4. Load the Dataset with Streaming Dataset
-#   5. Stream it with Streaming Loader (with a fixed (sentence_piece) tokenizer)
 from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
+from types import FunctionType
 from typing import Any, Callable, Dict, List
 
+import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from litdata.processing.functions import optimize
 from litdata.streaming.dataloader import StreamingDataLoader
@@ -92,10 +88,8 @@ class DataHandler:
     tokenizer_fn: Callable = tokenize_wikitext
     """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions` takes in at least a
     single argument which is the index of the dataset and returns tokenized text for that index."""
-    tokenizer_root_path: Path = Path(__file__).parent.parent / "data" / "tokenizers"
-    """Root folder where to store all the downloaded tokenizers."""
-    bin_data_path: Path = Path(__file__).parent.parent / "data" / "binaries"
-    """Root folder where to store all the tokenized datasets."""
+    root_data_path: Path = Path(__file__).parent.parent / "data"
+    """Root folder which holds tokenizers, binaries, cache folders."""
     splits: List[str] = field(default_factory=lambda: ["train", "validation", "test"])
     """Data splits to create or load from hf hub.
 
@@ -126,21 +120,26 @@ class DataHandler:
     num_workers: int = 1
     """Number of workers for `StreamingDataLoader`"""
 
-    # TODO: organize into 2 more functions?
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
+        self.tokenizer_root_path = self.root_data_path / "tokenizers"
+        """Root folder where to store all the downloaded tokenizers."""
+        self.bin_data_path = self.root_data_path / "binaries"
+        """Root folder where to store all the tokenized datasets."""
+        self.cache_dir = self.root_data_path / "cache"
+        """Cache directory for huggingface datasets."""
         self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
         self.datasets: Dict[str, StreamingDataset] = {}
         self.data_loaders: Dict[str, StreamingDataLoader] = {}
 
     def __convert_to_binary(self) -> None:
-        dataset_splits: Dict[str, Any] = {}
-        missing_splits: bool = False
-        # TODO: Write a yaml file to the binaries/dataset/subset/ folder after optimize(...) call
-        if not self.force_overwrite and all((self.binary_path / split).exists() for split in self.splits):
-            # Return if all folders for splits exists
-            # TODO: compare YAML files
+        if (
+            not self.force_overwrite
+            and all((self.binary_path / split).exists() for split in self.splits)
+            and self.serialized() == self.load_yaml()
+        ):
+            # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
                 f"Dataset {self.hf_dataset_id} already exists at {self.binary_path}.\n"
                 f"Quitting...\n"
@@ -148,6 +147,29 @@ class DataHandler:
             )
             return
 
+        dataset_splits = self.__get_data_splits()
+
+        download_tokenizer(repo_id=self.tokenizer_repo_id, root_dir=self.tokenizer_root_path)
+        tokenizer = Tokenizer(self.tokenizer_root_path / self.tokenizer_repo_id)
+
+        for split, dataset in dataset_splits.items():
+            split_output_path = self.binary_path / split
+            split_output_path.mkdir(parents=True, exist_ok=True)
+            token_fn = partial(
+                self.tokenizer_fn,
+                dataset=dataset,
+                tokenizer=tokenizer,
+                prep_fn=self.preprocess_fn,
+                **self.tokenizer_fn_kwargs,
+            )
+            optimize(
+                fn=token_fn, inputs=list(range(len(dataset))), output_dir=str(split_output_path), chunk_bytes="64MB"
+            )
+        self.write_yaml()
+
+    def __get_data_splits(self) -> Dict[str, Dataset]:
+        dataset_splits: Dict[str, Any] = {}
+        missing_splits: bool = False
         if not self.force_splits:
             for split in self.splits:
                 try:
@@ -157,6 +179,7 @@ class DataHandler:
                         split=split,
                         data_files=self.hf_data_files,
                         streaming=False,
+                        cache_dir=str(self.cache_dir),
                     ).filter(self.filter_function)
                     dataset_splits[split] = dataset
                 except ValueError as e:
@@ -175,9 +198,11 @@ class DataHandler:
                     break
 
         if missing_splits or self.force_splits:
-            # TODO: always use streaming=True
             dataset_dict: DatasetDict = load_dataset(
-                path=self.hf_dataset_id, name=self.hf_data_subset_name, data_files=self.hf_data_files, streaming=False
+                path=self.hf_dataset_id,
+                name=self.hf_data_subset_name,
+                data_files=self.hf_data_files,
+                cache_dir=str(self.cache_dir),
             )
             combined_dataset = concatenate_datasets(
                 [dataset_dict[split].filter(self.filter_function) for split in list(dataset_dict.keys())]
@@ -199,22 +224,7 @@ class DataHandler:
                     remainder = 1 - (ratio / remainder)
                 dataset_splits[split_ratio_pairs[-1][-1]] = remaining_dataset
 
-        download_tokenizer(repo_id=self.tokenizer_repo_id, root_dir=self.tokenizer_root_path)
-        tokenizer = Tokenizer(self.tokenizer_root_path / self.tokenizer_repo_id)
-
-        for split, dataset in dataset_splits.items():
-            split_output_path = self.binary_path / split
-            split_output_path.mkdir(parents=True, exist_ok=True)
-            token_fn = partial(
-                self.tokenizer_fn,
-                dataset=dataset,
-                tokenizer=tokenizer,
-                prep_fn=self.preprocess_fn,
-                **self.tokenizer_fn_kwargs,
-            )
-            optimize(
-                fn=token_fn, inputs=list(range(len(dataset))), output_dir=str(split_output_path), chunk_bytes="64MB"
-            )
+        return dataset_splits
 
     def __load_datasets(self) -> None:
         """Loads the `StreamingDatasets` into `self.datasets` dict, keys are `splits`"""
@@ -238,6 +248,28 @@ class DataHandler:
             self.data_loaders[split] = StreamingDataLoader(
                 dataset=self.datasets[split], batch_size=self.batch_size, num_workers=self.num_workers
             )
+
+    def serialized(self) -> Dict[str, Any]:
+        # TODO: make the class reconstructable from the yaml file
+        def serialize(value: Any) -> Any:
+            if isinstance(value, partial):
+                return {"function": f"{value.func.__module__}.{value.func.__name__}", "kwargs": value.keywords}
+            if isinstance(value, FunctionType):
+                return f"{value.__module__}.{value.__name__}"
+            if isinstance(value, Path):
+                return str(value)
+            return value
+
+        return {key: serialize(value) for key, value in asdict(self).items()}
+
+    def write_yaml(self) -> None:
+        ser_dict = self.serialized()
+        with (self.binary_path / "dataset.yaml").open("w", encoding="utf-8") as yaml_file:
+            yaml.dump(ser_dict, yaml_file)
+
+    def load_yaml(self) -> Dict[str, Any]:
+        with (self.binary_path / "dataset.yaml").open(encoding="utf-8") as yaml_file:
+            return yaml.safe_load(yaml_file)
 
 
 if __name__ == "__main__":
