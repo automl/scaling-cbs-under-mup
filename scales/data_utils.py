@@ -85,6 +85,8 @@ class DataHandler:
     dataset being processed and outputs the processed text file."""
     tokenizer_repo_id: str
     """HuggingFace repository ID for the model which we will use the tokenizer of."""
+    hf_data_files: str | None = None
+    """HuggingFace dataset data_files."""
     filter_function: Callable = field(default=lambda row: len(row["text"]) > 1)
     """Filter function to be called on each dataset object immediately after loading."""
     tokenizer_fn: Callable = tokenize_wikitext
@@ -150,7 +152,11 @@ class DataHandler:
             for split in self.splits:
                 try:
                     dataset: Dataset = load_dataset(
-                        path=self.hf_dataset_id, name=self.hf_data_subset_name, split=split
+                        path=self.hf_dataset_id,
+                        name=self.hf_data_subset_name,
+                        split=split,
+                        data_files=self.hf_data_files,
+                        streaming=False,
                     ).filter(self.filter_function)
                     dataset_splits[split] = dataset
                 except ValueError as e:
@@ -169,7 +175,10 @@ class DataHandler:
                     break
 
         if missing_splits or self.force_splits:
-            dataset_dict: DatasetDict = load_dataset(path=self.hf_dataset_id, name=self.hf_data_subset_name)
+            # TODO: always use streaming=True
+            dataset_dict: DatasetDict = load_dataset(
+                path=self.hf_dataset_id, name=self.hf_data_subset_name, data_files=self.hf_data_files, streaming=False
+            )
             combined_dataset = concatenate_datasets(
                 [dataset_dict[split].filter(self.filter_function) for split in list(dataset_dict.keys())]
             )
@@ -180,10 +189,14 @@ class DataHandler:
                 # Split combined data into len(self.default_split_ratio) splits
                 split_ratio_pairs = sorted(zip(self.default_split_ratio, self.splits), reverse=True)
                 remaining_dataset = combined_dataset
+                remainder = 1.0
                 for ratio, split in split_ratio_pairs[:-1]:
-                    dataset_dict_: DatasetDict = remaining_dataset.train_test_split(test_size=1 - ratio, seed=self.seed)
+                    dataset_dict_: DatasetDict = remaining_dataset.train_test_split(
+                        test_size=1 - (ratio / remainder), seed=self.seed
+                    )
                     target_dataset, remaining_dataset = dataset_dict_["train"], dataset_dict_["test"]
                     dataset_splits[split] = target_dataset
+                    remainder = 1 - (ratio / remainder)
                 dataset_splits[split_ratio_pairs[-1][-1]] = remaining_dataset
 
         download_tokenizer(repo_id=self.tokenizer_repo_id, root_dir=self.tokenizer_root_path)
@@ -237,5 +250,5 @@ if __name__ == "__main__":
         force_splits=True,
     )
 
-    data_handler.load_data_laoders()
+    data_handler.load_data_loaders()
     print(data_handler.data_loaders["train"])
