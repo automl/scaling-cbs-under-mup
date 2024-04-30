@@ -2,6 +2,7 @@ import lightning as L
 
 from scales.data_utils import DataHandler, preprocess_wikitext
 from scales.pretrain_pipeline import main
+from pathlib import Path
 
 if __name__ == "__main__":
     fabric = L.Fabric(devices="auto", strategy="auto")
@@ -25,7 +26,7 @@ if __name__ == "__main__":
         },
         max_train_steps=3,
         max_val_steps=2,
-        model_config_file="model.yaml",
+        model_config_file=Path(__file__).parent / "model.yaml",
     )
 
     fabric.print(f"Final Validation loss: {result_dict['val_loss']}")

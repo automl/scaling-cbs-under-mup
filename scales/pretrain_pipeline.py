@@ -29,7 +29,7 @@ from scales.utils import load_checkpoint, save_checkpoint
 def main(
     fabric: L.Fabric,
     data: DataHandler,
-    out_dir: Path = Path("output"),
+    out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"lr": 3e-3, "weight_decay": 0.02},
     nbr_steps_to_validate: int = 5,
     load_model_from_path: str | Path | None = None,
