@@ -97,7 +97,7 @@ class DataHandler:
     tokenizer_fn: Callable = tokenize_wikitext
     """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`.
 
-    takes in at least a single argument, which is the index (or list of indices) of the dataset and returns a tensor for
+    Takes in at least a single argument, which is the index (or list of indices) of the dataset and returns a tensor for
     the corresponding text.
 
     """
@@ -172,9 +172,9 @@ class DataHandler:
                 self.tokenizer_fn,
                 dataset=dataset,
                 tokenizer=tokenizer,
-                prep_fn=self.preprocess_fn,
                 **self.tokenizer_fn_kwargs,
             )
+            # TODO: Script to find out optimal data prep batch size to speed up large datasets
             optimize(
                 fn=token_fn,
                 inputs=list(range(len(dataset))),

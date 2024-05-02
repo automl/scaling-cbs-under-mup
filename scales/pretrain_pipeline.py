@@ -33,9 +33,11 @@ def main(
     hparams: dict = {"lr": 3e-3, "weight_decay": 0.02},
     nbr_steps_to_validate: int = 5,
     load_model_from_path: str | Path | None = None,
-    max_train_steps: int = 5,
+    max_train_steps: int | None = None,
     max_val_steps: int = 5,
     max_train_tokens: int | None = None,
+    tokens_per_param: int | None = None,
+    force_unique_tokens: bool = False,
     model_name: str | None = None,
     model_config_file: str | Path | None = None,
     seed: int = 1337,
@@ -43,38 +45,25 @@ def main(
     fabric.seed_everything(seed)
     out_dir = init_out_dir(out_dir)
 
-    if load_model_from_path is None:
-        # Setting up model configuration
-        if model_config_file and model_name is None:
-            config = Config.from_file(model_config_file)
-        elif model_name and model_config_file is None:
-            config = Config.from_name(model_name)
-        elif model_config_file is not None and model_name is not None:
-            raise ValueError("Only one of `model_name` or `model_config` can be set.")
-        else:
-            raise ValueError("Please specify model_name")
-        states: Dict[str, Any] = {}
-        model = GPT(config)
-    else:
-        if model_config_file or model_name:
-            warnings.warn(
-                "The configuration yaml in the loaded directory will be used "
-                "`model_config_file` and `model_name` are ignored"
-            )
-        states, model_path = load_checkpoint(fabric, load_model_from_path)
-        config = Config.from_file(model_path)
-        model = GPT(config)
-        model.load_state_dict(states["model"])
-
-    fabric.print(f"Number of trainable parameters: {num_parameters(model, requires_grad=True):,}")
-    model = fabric.setup(model)
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=hparams["lr"], weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
+    states = init_state(
+        fabric=fabric,
+        hparams=hparams,
+        load_model_from_path=load_model_from_path,
+        model_name=model_name,
+        model_config_file=model_config_file,
     )
-    if len(states) != 0:
-        optimizer.load_state_dict(states["optimizer"])
-    optimizer = fabric.setup_optimizers(optimizer)
+
+    model = states["model"]
+
+    trainable_params = num_parameters(model, requires_grad=True)
+    if tokens_per_param is None and max_train_tokens is None and max_train_steps is None:
+        raise ValueError("One of `max_train_steps` or `max_train_tokens` or `tokens_per_param` should be set.")
+    if tokens_per_param and (max_train_tokens or max_train_steps):
+        raise ValueError("`tokens_per_param` can be set together with `max_train_tokens` or `max_train_steps`")
+    if tokens_per_param:
+        max_train_tokens = tokens_per_param * trainable_params
+
+    fabric.print(f"Number of trainable parameters: {trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
     data.load_data_loaders()
@@ -86,16 +75,17 @@ def main(
     fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
     fabric.print(f"Steps for validation: {len(val_dataloader)}")
 
-    tokens_per_step = data.batch_size * data.block_size
+    tokens_per_step = data.batch_size * (data.block_size + 1)
+    max_data_tokens = len(train_dataloader) * tokens_per_step
+
+    if force_unique_tokens:
+        seen_tokens = states.get("train_tokens", 0)
+        if (max_train_steps and max_train_steps * tokens_per_step > (max_data_tokens - seen_tokens)) or (
+            max_train_tokens and max_train_tokens > (max_data_tokens - seen_tokens)
+        ):
+            raise ValueError(f"Training on Unique tokens can't be guaranteed available tokens: {max_data_tokens}")
 
     train_time = time.perf_counter()
-
-    if len(states) == 0:
-        states["train_steps"] = 0
-        states["train_tokens"] = 0
-
-    states["model"] = model
-    states["optimizer"] = optimizer
 
     # Training and Validation
     val_loss = train(
@@ -117,6 +107,58 @@ def main(
     return {"val_loss": val_loss}
 
 
+def init_state(
+    fabric: L.Fabric,
+    hparams: dict | None = None,
+    load_model_from_path: str | Path | None = None,
+    model_name: str | None = None,
+    model_config_file: str | Path | None = None,
+) -> dict:
+    if hparams is None:
+        hparams = {"lr": 3e-3, "weight_decay": 0.02}
+
+    if load_model_from_path is None:
+        # Setting up model configuration
+        if model_config_file and model_name is None:
+            config = Config.from_file(model_config_file)
+        elif model_name and model_config_file is None:
+            config = Config.from_name(model_name)
+        elif model_config_file and model_name:
+            raise ValueError("Only one of `model_name` or `model_config` can be set.")
+        else:
+            raise ValueError("Please specify `model_name` or `model_config_file`")
+        states: Dict[str, Any] = {}
+        model = GPT(config)
+    else:
+        if model_config_file or model_name:
+            warnings.warn(
+                "The configuration yaml in the loaded directory will be used "
+                "`model_config_file` and `model_name` are ignored"
+            )
+        states, model_path = load_checkpoint(fabric, load_model_from_path)
+        config = Config.from_file(model_path)
+        model = GPT(config)
+        model.load_state_dict(states["model"])
+
+    model = fabric.setup(model)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=hparams["lr"], weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
+    )
+    if len(states) != 0:
+        optimizer.load_state_dict(states["optimizer"])
+    optimizer = fabric.setup_optimizers(optimizer)
+
+    if len(states) == 0:
+        states["train_steps"] = 0
+        states["train_tokens"] = 0
+
+    states["model"] = model
+    states["optimizer"] = optimizer
+
+    return states
+
+
 def train(
     fabric: L.Fabric,
     states: dict,
@@ -129,6 +171,7 @@ def train(
     max_train_steps: int | None = None,
     max_train_tokens: int | None = None,
 ) -> torch.Tensor:
+    # TODO: Is `max_train_steps` a redundant arg if we have both `tokens_per_step` and `max_train_tokens`?
     if max_train_steps is None and max_train_tokens is None:
         raise ValueError("One of `max_train_steps` or `max_train_tokens` should be set.")
     if max_train_tokens and max_train_steps:
