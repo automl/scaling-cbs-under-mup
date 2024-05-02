@@ -6,8 +6,9 @@ from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 
+import torch
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from litdata.processing.functions import optimize
@@ -24,8 +25,8 @@ def download_tokenizer(repo_id: str, root_dir: str | Path, overwrite: bool = Fal
 
     Args:
     ----
-    repo_id (str): HuggingFace repository id for the tokenizer to be downloaded from
-    root_dir (Path, str): path to save the tokenizer under
+    repo_id: HuggingFace repository id for the tokenizer to be downloaded from
+    root_dir: path to save the tokenizer under
 
     """
     if isinstance(root_dir, str):
@@ -38,16 +39,21 @@ def download_tokenizer(repo_id: str, root_dir: str | Path, overwrite: bool = Fal
     download_from_hub(repo_id=repo_id, tokenizer_only=True, checkpoint_dir=root_dir, convert_checkpoint=False)
 
 
-def preprocess_wikitext(row: Dict[str, str]) -> str:
+def preprocess_wikitext(row: dict[str, str]) -> dict:
     """Wikitext specific preprocessing, removes new_line at the end of each file."""
-    return re.sub(r"\n$", "", row["text"])
+    row["text"] = re.sub(r"\n$", "", row["text"])
+    return row
 
 
-def tokenize_wikitext(index: int, dataset: Dataset, tokenizer: Tokenizer, prep_fn: Callable) -> Tensor:
-    """Tokenize each row in the dataset separately."""
+def tokenize_wikitext(indices: list[int] | int, dataset: Dataset, tokenizer: Tokenizer) -> Tensor:
+    """Tokenize each row in the dataset into tensors."""
     # only yield for now due to a bug on litdata
     # https://github.com/Lightning-AI/litdata/issues/70
-    yield tokenizer.encode(prep_fn(dataset[index]), eos=True)
+    if isinstance(indices, int):
+        yield tokenizer.encode(dataset[indices]["text"], eos=True)
+    else:
+        # Yield batches to be fast on large datasets
+        yield torch.cat([tokenizer.encode(dataset[index]["text"], eos=True) for index in indices])
 
 
 # def tokenize_text() -> None:
@@ -76,21 +82,28 @@ class DataHandler:
     """Dataset identifier for the HuggingFace Datasets."""
     hf_data_subset_name: str
     """Dataset Subset name for the datasets with multiple subsets."""
-    preprocess_fn: Callable
-    """`tokenizer_fn` usually requires a preprocess function which takes in in a single argument which is a row of the
-    dataset being processed and outputs the processed text file."""
+    preprocess_fn: Callable[[dict], dict]
+    """Preprocess Dataset before passing into tokenization.
+
+    To be used in `Dataset.map(...)` function
+
+    """
     tokenizer_repo_id: str
     """HuggingFace repository ID for the model which we will use the tokenizer of."""
     hf_data_files: str | None = None
     """HuggingFace dataset data_files."""
-    filter_function: Callable = field(default=lambda row: len(row["text"]) > 1)
+    filter_function: Callable[[dict], bool] = field(default=lambda row: len(row["text"]) > 1)
     """Filter function to be called on each dataset object immediately after loading."""
     tokenizer_fn: Callable = tokenize_wikitext
-    """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions` takes in at least a
-    single argument which is the index of the dataset and returns tokenized text for that index."""
+    """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`.
+
+    takes in at least a single argument, which is the index (or list of indices) of the dataset and returns a tensor for
+    the corresponding text.
+
+    """
     root_data_path: Path = Path(__file__).parent.parent / "data"
     """Root folder which holds tokenizers, binaries, cache folders."""
-    splits: List[str] = field(default_factory=lambda: ["train", "validation", "test"])
+    splits: list[str] = field(default_factory=lambda: ["train", "validation", "test"])
     """Data splits to create or load from hf hub.
 
     If any split other than the 'train' split doesn't exist,
@@ -98,7 +111,7 @@ class DataHandler:
     If 'train' split is specified but not found then an exception will occur
 
     """
-    default_split_ratio: List[float] = field(default_factory=lambda: [0.8, 0.1, 0.1])
+    default_split_ratio: list[float] = field(default_factory=lambda: [0.8, 0.1, 0.1])
     """Split ratios for data splits when either a split specified is not found on the hub or `force_splits` flag is
     set."""
     force_splits: bool = False
@@ -106,7 +119,7 @@ class DataHandler:
     `default_split_ratio`"""
     force_overwrite: bool = False
     """Forces to process the dataset again if set."""
-    tokenizer_fn_kwargs: Dict[Any, Any] = field(default_factory=dict)
+    tokenizer_fn_kwargs: dict[Any, Any] = field(default_factory=dict)
     """`tokenizer_fn` can take multiple arguments if their defaults are specified here."""
     seed: int = 42
     """Seed for splitting datasets and shuffling."""
@@ -130,8 +143,8 @@ class DataHandler:
         self.cache_dir = self.root_data_path / "cache"
         """Cache directory for huggingface datasets."""
         self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
-        self.datasets: Dict[str, StreamingDataset] = {}
-        self.data_loaders: Dict[str, StreamingDataLoader] = {}
+        self.datasets: dict[str, StreamingDataset] = {}
+        self.data_loaders: dict[str, StreamingDataLoader] = {}
 
     def __convert_to_binary(self) -> None:
         if (
@@ -163,24 +176,32 @@ class DataHandler:
                 **self.tokenizer_fn_kwargs,
             )
             optimize(
-                fn=token_fn, inputs=list(range(len(dataset))), output_dir=str(split_output_path), chunk_bytes="64MB"
+                fn=token_fn,
+                inputs=list(range(len(dataset))),
+                output_dir=str(split_output_path),
+                chunk_bytes="64MB",
+                batch_size=1024,
             )
         self.write_yaml()
 
-    def __get_data_splits(self) -> Dict[str, Dataset]:
-        dataset_splits: Dict[str, Any] = {}
+    def __get_data_splits(self) -> dict[str, Dataset]:
+        dataset_splits: dict[str, Any] = {}
         missing_splits: bool = False
         if not self.force_splits:
             for split in self.splits:
                 try:
-                    dataset: Dataset = load_dataset(
-                        path=self.hf_dataset_id,
-                        name=self.hf_data_subset_name,
-                        split=split,
-                        data_files=self.hf_data_files,
-                        streaming=False,
-                        cache_dir=str(self.cache_dir),
-                    ).filter(self.filter_function)
+                    dataset: Dataset = (
+                        load_dataset(
+                            path=self.hf_dataset_id,
+                            name=self.hf_data_subset_name,
+                            split=split,
+                            data_files=self.hf_data_files,
+                            streaming=False,
+                            cache_dir=str(self.cache_dir),
+                        )
+                        .filter(self.filter_function)
+                        .map(self.preprocess_fn)
+                    )
                     dataset_splits[split] = dataset
                 except ValueError as e:
                     # Don't load if the train split doesn't exist
@@ -205,7 +226,10 @@ class DataHandler:
                 cache_dir=str(self.cache_dir),
             )
             combined_dataset = concatenate_datasets(
-                [dataset_dict[split].filter(self.filter_function) for split in list(dataset_dict.keys())]
+                [
+                    dataset_dict[split].filter(self.filter_function).map(self.preprocess_fn)
+                    for split in list(dataset_dict.keys())
+                ]
             )
             if len(self.splits) < 2:
                 dataset_splits[self.splits[0]] = combined_dataset
@@ -249,7 +273,7 @@ class DataHandler:
                 dataset=self.datasets[split], batch_size=self.batch_size, num_workers=self.num_workers
             )
 
-    def serialized(self) -> Dict[str, Any]:
+    def serialized(self) -> dict[str, Any]:
         # TODO: make the class reconstructable from the yaml file
         def serialize(value: Any) -> Any:
             if isinstance(value, partial):
@@ -260,14 +284,14 @@ class DataHandler:
                 return str(value)
             return value
 
-        return {key: serialize(value) for key, value in asdict(self).items()}
+        return {key: serialize(value) for key, value in asdict(self).items() if key != "force_overwrite"}
 
     def write_yaml(self) -> None:
         ser_dict = self.serialized()
         with (self.binary_path / "dataset.yaml").open("w", encoding="utf-8") as yaml_file:
             yaml.dump(ser_dict, yaml_file)
 
-    def load_yaml(self) -> Dict[str, Any]:
+    def load_yaml(self) -> dict[str, Any]:
         with (self.binary_path / "dataset.yaml").open(encoding="utf-8") as yaml_file:
             return yaml.safe_load(yaml_file)
 
@@ -283,4 +307,8 @@ if __name__ == "__main__":
     )
 
     data_handler.load_data_loaders()
-    print(data_handler.data_loaders["train"])
+    print(len(data_handler.data_loaders["train"]))
+
+    for batch in data_handler.data_loaders["train"]:
+        print(batch.shape)
+        print("=" * 50)
