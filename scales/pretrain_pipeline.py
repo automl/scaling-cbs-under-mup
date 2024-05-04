@@ -30,7 +30,7 @@ def main(
     fabric: L.Fabric,
     data: DataHandler,
     out_dir: Path = Path(__file__).parent.parent / "output",
-    hparams: dict = {"lr": 3e-3, "weight_decay": 0.02},
+    hparams: dict = {"lr": 3e-3, "weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
     nbr_steps_to_validate: int = 5,
     load_model_from_path: str | Path | None = None,
     max_train_steps: int | None = None,
@@ -66,7 +66,7 @@ def main(
     fabric.print(f"Number of trainable parameters: {trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders()
+    data.load_data_loaders(batch_size=hparams.get("batch_size", 64), block_size=hparams.get("block_size", 2048))
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]

@@ -1,8 +1,9 @@
+from pathlib import Path
+
 import lightning as L
 
 from scales.data_utils import DataHandler, preprocess_wikitext
 from scales.pretrain_pipeline import main
-from pathlib import Path
 
 if __name__ == "__main__":
     fabric = L.Fabric(devices="auto", strategy="auto")
@@ -13,8 +14,6 @@ if __name__ == "__main__":
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
         force_splits=True,
-        batch_size=16,
-        block_size=64,
     )
 
     result_dict = main(

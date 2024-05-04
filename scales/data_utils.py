@@ -124,15 +124,6 @@ class DataHandler:
     seed: int = 42
     """Seed for splitting datasets and shuffling."""
 
-    nlp_dataset: bool = True
-    """Use optimized data reading for the `StreamingDataset` if the dataset is an nlp dataset."""
-    batch_size: int = 64
-    """Batch size for `StreamingDataLoader` (same for all splits)"""
-    block_size: int = 2048
-    """Block size in each batch."""
-    num_workers: int = 1
-    """Number of workers for `StreamingDataLoader`"""
-
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
@@ -250,27 +241,47 @@ class DataHandler:
 
         return dataset_splits
 
-    def __load_datasets(self) -> None:
-        """Loads the `StreamingDatasets` into `self.datasets` dict, keys are `splits`"""
+    def __load_datasets(
+        self,
+        nlp_dataset: bool = True,
+        block_size: int = 2048,
+    ) -> None:
+        """Loads the `StreamingDatasets` into `self.datasets` dict, keys are `splits`
+
+        Args:
+            nlp_dataset: Use optimized data reading for the `StreamingDataset` if the dataset is an nlp dataset.
+            block_size: Block size in each batch.
+
+        """
         # TODO: Add option to merge datasets with `CombinedStreamingDataset`
         item_loader = None
-        if self.nlp_dataset:
+        if nlp_dataset:
             from litdata.streaming.item_loader import TokensLoader
 
-            item_loader = TokensLoader(block_size=self.block_size + 1)
+            item_loader = TokensLoader(block_size=block_size + 1)
 
         for split in self.splits:
             self.datasets[split] = StreamingDataset(
                 input_dir=str(self.binary_path / split), item_loader=item_loader, shuffle=True, seed=self.seed
             )
 
-    def load_data_loaders(self) -> None:
-        """Loads the `StreamingDataLoaders` into `self.data_loaders` dict, keys are `splits`"""
+    def load_data_loaders(
+        self, nlp_dataset: bool = True, batch_size: int = 64, block_size: int = 2048, num_workers: int = 1
+    ) -> None:
+        """Loads the `StreamingDataLoaders` into `self.data_loaders` dict, keys are `splits`
+
+        Args:
+            nlp_dataset: Use optimized data reading for the `StreamingDataset` if the dataset is an nlp dataset.
+            batch_size: Batch size for `StreamingDataLoader` (same for all splits)
+            block_size: Block size in each batch.
+            num_workers: Number of workers for `StreamingDataLoader`
+
+        """
         self.__convert_to_binary()
-        self.__load_datasets()
+        self.__load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
             self.data_loaders[split] = StreamingDataLoader(
-                dataset=self.datasets[split], batch_size=self.batch_size, num_workers=self.num_workers
+                dataset=self.datasets[split], batch_size=batch_size, num_workers=num_workers
             )
 
     def serialized(self) -> dict[str, Any]:

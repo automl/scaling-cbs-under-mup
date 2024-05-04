@@ -24,8 +24,6 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
         force_splits=True,
-        batch_size=16,
-        block_size=64,
     )
 
     if previous_pipeline_directory is None:
@@ -33,7 +31,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
             fabric=fabric,
             data=data,
             out_dir=pipeline_directory / "output",
-            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"]},
+            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"], "batch_size": 64, "block_size": 2048},
             model_config_file="model.yaml",
             max_train_steps=hparams["steps"],
             max_val_steps=2,
@@ -43,7 +41,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
             fabric=fabric,
             data=data,
             out_dir=pipeline_directory / "output",
-            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"]},
+            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"], "batch_size": 64, "block_size": 2048},
             load_model_from_path=previous_pipeline_directory / "output",
             max_train_steps=hparams["steps"],
             max_val_steps=2,
