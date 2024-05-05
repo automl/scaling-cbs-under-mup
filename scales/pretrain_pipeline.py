@@ -54,6 +54,8 @@ def main(
     )
 
     model = states["model"]
+    batch_size = hparams.get("batch_size", 64)
+    block_size = hparams.get("block_size", 2048)
 
     trainable_params = num_parameters(model, requires_grad=True)
     if tokens_per_param is None and max_train_tokens is None and max_train_steps is None:
@@ -66,7 +68,7 @@ def main(
     fabric.print(f"Number of trainable parameters: {trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders(batch_size=hparams.get("batch_size", 64), block_size=hparams.get("block_size", 2048))
+    data.load_data_loaders(batch_size=batch_size, block_size=block_size)
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]
@@ -75,7 +77,7 @@ def main(
     fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
     fabric.print(f"Steps for validation: {len(val_dataloader)}")
 
-    tokens_per_step = data.batch_size * (data.block_size + 1)
+    tokens_per_step = batch_size * (block_size + 1)
     max_data_tokens = len(train_dataloader) * tokens_per_step
 
     if force_unique_tokens:
@@ -95,7 +97,7 @@ def main(
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         max_val_steps=max_val_steps,
-        max_seq_length=data.block_size,
+        max_seq_length=block_size,
         max_train_steps=max_train_steps,
         max_train_tokens=max_train_tokens,
         nbr_steps_to_validate=nbr_steps_to_validate,
