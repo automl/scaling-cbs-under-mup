@@ -77,7 +77,7 @@ def main(
     fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
     fabric.print(f"Steps for validation: {len(val_dataloader)}")
 
-    tokens_per_step = batch_size * (block_size + 1)
+    tokens_per_step = batch_size * block_size
     max_data_tokens = len(train_dataloader) * tokens_per_step
 
     if force_unique_tokens:

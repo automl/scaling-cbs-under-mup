@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from types import FunctionType
 from typing import Any, Callable
 
 import torch
-import yaml
+from config_utils import BaseConfig
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from litdata.processing.functions import optimize
 from litdata.streaming.dataloader import StreamingDataLoader
@@ -76,7 +75,7 @@ def tokenize_wikitext(indices: list[int] | int, dataset: Dataset, tokenizer: Tok
 
 
 @dataclass
-class DataHandler:
+class DataHandler(BaseConfig):
     # TODO: Write a wrapper to read configs from a yaml file and do everything
     hf_dataset_id: str
     """Dataset identifier for the HuggingFace Datasets."""
@@ -127,6 +126,7 @@ class DataHandler:
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self.tokenizer_root_path = self.root_data_path / "tokenizers"
         """Root folder where to store all the downloaded tokenizers."""
         self.bin_data_path = self.root_data_path / "binaries"
@@ -136,12 +136,13 @@ class DataHandler:
         self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
+        self.ignore_fields = "force_overwrite"
 
     def __convert_to_binary(self) -> None:
         if (
             not self.force_overwrite
             and all((self.binary_path / split).exists() for split in self.splits)
-            and self.serialized() == self.load_yaml()
+            and self.serialized() == self.load_yaml(self.binary_path)
         ):
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
@@ -173,7 +174,7 @@ class DataHandler:
                 chunk_bytes="64MB",
                 batch_size=1024,
             )
-        self.write_yaml()
+        self.write_yaml(self.binary_path)
 
     def __get_data_splits(self) -> dict[str, Dataset]:
         dataset_splits: dict[str, Any] = {}
@@ -283,28 +284,6 @@ class DataHandler:
             self.data_loaders[split] = StreamingDataLoader(
                 dataset=self.datasets[split], batch_size=batch_size, num_workers=num_workers
             )
-
-    def serialized(self) -> dict[str, Any]:
-        # TODO: make the class reconstructable from the yaml file
-        def serialize(value: Any) -> Any:
-            if isinstance(value, partial):
-                return {"function": f"{value.func.__module__}.{value.func.__name__}", "kwargs": value.keywords}
-            if isinstance(value, FunctionType):
-                return f"{value.__module__}.{value.__name__}"
-            if isinstance(value, Path):
-                return str(value)
-            return value
-
-        return {key: serialize(value) for key, value in asdict(self).items() if key != "force_overwrite"}
-
-    def write_yaml(self) -> None:
-        ser_dict = self.serialized()
-        with (self.binary_path / "dataset.yaml").open("w", encoding="utf-8") as yaml_file:
-            yaml.dump(ser_dict, yaml_file)
-
-    def load_yaml(self) -> dict[str, Any]:
-        with (self.binary_path / "dataset.yaml").open(encoding="utf-8") as yaml_file:
-            return yaml.safe_load(yaml_file)
 
 
 if __name__ == "__main__":

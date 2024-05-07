@@ -19,8 +19,8 @@ if __name__ == "__main__":
     result_dict = main(
         fabric=fabric,
         data=data,
-        hparams={"lr": 0.002, "weight_decay": 0.001, "batch_size": 16, "block_size": 64},
-        max_train_steps=3,
+        hparams={"lr": 0.002, "weight_decay": 0.001, "batch_size": 2, "block_size": 2048},
+        max_train_steps=300,
         max_val_steps=2,
         model_config_file=Path(__file__).parent / "model.yaml",
     )
