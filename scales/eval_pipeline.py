@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import lightning as L
-from config_utils import BaseConfig
-from data_utils import DataHandler
-from eval_utils import convert_and_evaluate
+
+from scales.config_utils import BaseConfig
+from scales.eval_utils import convert_and_evaluate
 
 
 @dataclass
@@ -28,30 +28,33 @@ class EvalHandler(BaseConfig):
     tokenizer_dir: str | Path
     """Directory containing the tokenizer specifications."""
     lm_eval_tasks: str = "mmlu_professional_law"
-    """Comma separated list of `lm_eval` `task_id`s
+    """Comma separated list of `lm_eval` `task_id`s.
+
     Print all possible task ids by running:
     ```python
     from lm_eval.tasks import TaskManager
     taskm = TaskManager()
     print("\n".join(taskm.task_index.keys()))
     ```
+
     """
     seed: int = 1234
     """Random seed."""
     num_fewshot: int | None = None
     """Number of examples in few-shot context."""
     # is_finetuning: bool
-    data_handler: DataHandler | Path | None = None
+    data_handler_path: Path | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        self.output_dir = Path(self.model_dir) / "evaluate"
+        self.model_dir = Path(self.model_dir)
+        self.output_dir = self.model_dir / "evaluate"
 
     def evaluate(self) -> None:
         fabric = L.Fabric(devices="auto", strategy="auto")
         convert_and_evaluate(
             fabric=fabric,
-            checkpoint_dir=self.model_dir,
+            checkpoint_dir=self.model_dir,  # type: ignore
             tokenizer=self.tokenizer_dir,
             tasks=self.lm_eval_tasks,
             out_dir=self.output_dir,

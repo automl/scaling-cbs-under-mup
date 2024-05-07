@@ -14,18 +14,11 @@ class BaseConfig:
     """Base class to load and save yaml files for configurations."""
 
     def __post_init__(self) -> None:
-        self._ignore_fields: list[str] = []
-
-    @property
-    def ignore_fields(self) -> list:
-        return self._ignore_fields
-
-    @ignore_fields.setter
-    def ignore_fields(self, value: str) -> None:
-        self._ignore_fields.append(value)
+        self.ignore_fields: list[str] = []
 
     def serialized(self) -> dict[str, Any]:
         # TODO: make the class reconstructable from the yaml file
+        # TODO: Add some custom tags to do this
         def serialize(value: Any) -> Any:
             if isinstance(value, partial):
                 return {"function": f"{value.func.__module__}.{value.func.__name__}", "kwargs": value.keywords}

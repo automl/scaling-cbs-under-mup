@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 import torch
-from config_utils import BaseConfig
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from litdata.processing.functions import optimize
 from litdata.streaming.dataloader import StreamingDataLoader
 from litdata.streaming.dataset import StreamingDataset
 from litgpt.tokenizer import Tokenizer
 from torch import Tensor
+
+from scales.config_utils import BaseConfig
 
 
 def download_tokenizer(repo_id: str, root_dir: str | Path, overwrite: bool = False) -> None:
@@ -76,7 +77,15 @@ def tokenize_wikitext(indices: list[int] | int, dataset: Dataset, tokenizer: Tok
 
 @dataclass
 class DataHandler(BaseConfig):
-    # TODO: Write a wrapper to read configs from a yaml file and do everything
+    """This class defines a dataset and how it was processed, tokenized, split, optimized and saved. When downloading,
+    this class will create an YAML file in the target folder. Later when the Dataset is requested again if the
+    arguments of this class matches the saved configuration in the YAML file the dataset will be loaded, otherwise,
+    it'll download the dataset again.
+
+    WARNING: All fields not passed to the `self.ignore_fields` will be checked
+
+    """
+
     hf_dataset_id: str
     """Dataset identifier for the HuggingFace Datasets."""
     hf_data_subset_name: str
@@ -136,7 +145,8 @@ class DataHandler(BaseConfig):
         self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
-        self.ignore_fields = "force_overwrite"
+        # add `force_overwrite` key to the ignored fields when writing YAML
+        self.ignore_fields.append("force_overwrite")
 
     def __convert_to_binary(self) -> None:
         if (
@@ -242,7 +252,7 @@ class DataHandler(BaseConfig):
 
         return dataset_splits
 
-    def __load_datasets(
+    def load_datasets(
         self,
         nlp_dataset: bool = True,
         block_size: int = 2048,
@@ -254,7 +264,8 @@ class DataHandler(BaseConfig):
             block_size: Block size in each batch.
 
         """
-        # TODO: Add option to merge datasets with `CombinedStreamingDataset`
+        # TODO: write a helper function to combine multiple datasets with `CombinedStreamingDataset` if necessary
+        self.__convert_to_binary()
         item_loader = None
         if nlp_dataset:
             from litdata.streaming.item_loader import TokensLoader
@@ -278,8 +289,7 @@ class DataHandler(BaseConfig):
             num_workers: Number of workers for `StreamingDataLoader`
 
         """
-        self.__convert_to_binary()
-        self.__load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
+        self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
             self.data_loaders[split] = StreamingDataLoader(
                 dataset=self.datasets[split], batch_size=batch_size, num_workers=num_workers
