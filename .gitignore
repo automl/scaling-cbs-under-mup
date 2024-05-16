@@ -59,6 +59,7 @@ coverage.xml
 data/
 result/
 output/
+runs/
 
 # Poetry Lock
 poetry.lock

@@ -4,8 +4,7 @@ started.
 Current missing features:
 
 - No precision editing from fabric
-- No LR warmstarting
-- No logger (only to terminal) Maybe use neps's tblogger
+- No logger (only to terminal)
 - No grad accumulation
 
 """
@@ -23,14 +22,16 @@ from litgpt.utils import CycleIterator, init_out_dir, num_parameters
 from torch.utils.data import DataLoader
 
 from scales.data_utils import DataHandler
+from scales.lr_utils import BaseLR
 from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
     fabric: L.Fabric,
     data: DataHandler,
+    lr_details: BaseLR,
     out_dir: Path = Path(__file__).parent.parent / "output",
-    hparams: dict = {"lr": 3e-3, "weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
+    hparams: dict = {"weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
     nbr_steps_to_validate: int = 5,
     load_model_from_path: str | Path | None = None,
     max_train_steps: int | None = None,
@@ -48,6 +49,7 @@ def main(
     states = init_state(
         fabric=fabric,
         hparams=hparams,
+        lr_details=lr_details,
         load_model_from_path=load_model_from_path,
         model_name=model_name,
         model_config_file=model_config_file,
@@ -101,6 +103,7 @@ def main(
         max_train_steps=max_train_steps,
         max_train_tokens=max_train_tokens,
         nbr_steps_to_validate=nbr_steps_to_validate,
+        lr_details=lr_details,
     )
     fabric.print(f"Train time: {(time.perf_counter() - train_time):.3f}s")
 
@@ -111,6 +114,7 @@ def main(
 
 def init_state(
     fabric: L.Fabric,
+    lr_details: BaseLR,
     hparams: dict | None = None,
     load_model_from_path: str | Path | None = None,
     model_name: str | None = None,
@@ -145,7 +149,7 @@ def init_state(
     model = fabric.setup(model)
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=hparams["lr"], weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
+        model.parameters(), lr=lr_details.init_lr, weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
     )
     if len(states) != 0:
         optimizer.load_state_dict(states["optimizer"])
@@ -169,6 +173,7 @@ def train(
     val_dataloader: DataLoader,
     max_val_steps: int,
     max_seq_length: int,
+    lr_details: BaseLR,
     nbr_steps_to_validate: int = 5,
     max_train_steps: int | None = None,
     max_train_tokens: int | None = None,
@@ -187,6 +192,9 @@ def train(
             break
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
+
+        for param_group in states["optimizer"].param_groups:
+            param_group["lr"] = lr_details.get_lr(states["train_steps"], optimizer=states["optimizer"])
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()

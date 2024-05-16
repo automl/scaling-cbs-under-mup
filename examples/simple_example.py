@@ -4,6 +4,7 @@ import lightning as L
 
 from scales.data_utils import DataHandler, preprocess_wikitext
 from scales.eval_pipeline import EvalHandler
+from scales.lr_utils import ExponetialWarmupSchedulerLR
 from scales.pretrain_pipeline import main
 
 if __name__ == "__main__":
@@ -19,10 +20,19 @@ if __name__ == "__main__":
         force_splits=True,
     )
 
+    lr_details = ExponetialWarmupSchedulerLR(
+        init_lr=0.002,
+        decay_rate=0.75,
+        min_lr=5e-5,
+        max_warmup_steps=150,
+        start_decay_at_step=1000,
+    )
+
     result_dict = main(
         fabric=fabric,
         data=data,
-        hparams={"lr": 0.002, "weight_decay": 0.001, "batch_size": 4, "block_size": 1028},
+        lr_details=lr_details,
+        hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1028},
         max_train_steps=2000,
         max_val_steps=2,
         out_dir=model_dir,

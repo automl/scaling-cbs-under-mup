@@ -6,6 +6,7 @@ import lightning as L
 import neps
 
 from scales.data_utils import DataHandler, preprocess_wikitext
+from scales.lr_utils import ConstantLR
 from scales.pretrain_pipeline import main
 
 pipeline_space = {
@@ -26,12 +27,15 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         force_splits=True,
     )
 
+    lr_details = ConstantLR(init_lr=hparams["lr"])
+
     if previous_pipeline_directory is None:
         result_dict = main(
             fabric=fabric,
             data=data,
+            lr_details=lr_details,
             out_dir=pipeline_directory / "output",
-            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"], "batch_size": 64, "block_size": 2048},
+            hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
             model_config_file="model.yaml",
             max_train_steps=hparams["steps"],
             max_val_steps=2,
@@ -40,8 +44,9 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         result_dict = main(
             fabric=fabric,
             data=data,
+            lr_details=lr_details,
             out_dir=pipeline_directory / "output",
-            hparams={"lr": hparams["lr"], "weight_decay": hparams["wd"], "batch_size": 64, "block_size": 2048},
+            hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
             load_model_from_path=previous_pipeline_directory / "output",
             max_train_steps=hparams["steps"],
             max_val_steps=2,
@@ -58,4 +63,5 @@ if __name__ == "__main__":
         root_directory="result",
         max_evaluations_total=10,
         searcher="priorband",
+        sample_default_first=True,
     )
