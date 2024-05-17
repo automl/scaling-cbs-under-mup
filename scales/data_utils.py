@@ -131,27 +131,76 @@ class DataHandler(BaseConfig):
     """`tokenizer_fn` can take multiple arguments if their defaults are specified here."""
     seed: int = 42
     """Seed for splitting datasets and shuffling."""
+    # subsample_size: str | None = None
+    """Size of the already subsampled set e.g: 4M, 47M, used only for loading not for writing
+    Note: valid `subsample_size`s are generated only after the first time `self.write_subsamples` is called
+    """
+    subsample_index: int = 0
+    """Valid subsample size indices are: `0`, `1`, `2`.
+    `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
+    """
+    nlp_dataset: bool = True
+    """Optimize the data loading for nlp datasets (Will be removed in the next iteration)"""
+    block_size: int = 2048
+    """Block size for data loading (Will be removed in the next iteration)"""
 
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.ignore_fields.append("force_overwrite")
+        self.ignore_fields.append("subsample_index")
+        self.ignore_fields.extend(["nlp_dataset", "block_size"])
         self.tokenizer_root_path = self.root_data_path / "tokenizers"
         """Root folder where to store all the downloaded tokenizers."""
         self.bin_data_path = self.root_data_path / "binaries"
         """Root folder where to store all the tokenized datasets."""
         self.cache_dir = self.root_data_path / "cache"
         """Cache directory for huggingface datasets."""
+        # main/parent dataset path
         self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
+        if self.subsample_index:
+            self._get_subsample_sizes()
+            self._set_split_paths(True)
+            if not all(path.exists() for path in self.split_paths):
+                # if any path doesn't exist generate subsample sets first
+                self.write_subsamples(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        else:
+            self._set_split_paths(False)
         # add `force_overwrite` key to the ignored fields when writing YAML
-        self.ignore_fields.append("force_overwrite")
+
+    def _set_split_paths(self, subsample_mode: bool) -> None:
+        if subsample_mode:
+            # Get the first split from the subsample and other splits from the parent
+            self.split_paths: list[Path] = [
+                self.binary_path.parent
+                / f"{self.hf_data_subset_name}_{self.subsample_sizes[self.subsample_index]}M"
+                / self.splits[0]
+            ] + [self.binary_path / split for split in self.splits[1:]]
+        else:
+            self.split_paths = [self.binary_path / split for split in self.splits]
+
+    def _get_subsample_sizes(self) -> None:
+        # masquerade as the parent dataset here
+        self._set_split_paths(False)
+        self.load_datasets(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        dataset = self.datasets[self.splits[0]]
+        n_tokens = len(dataset) * dataset[0].shape[0]
+        sample_sizes: list[int] = []
+        if n_tokens > 20e6:
+            # subsample at 50% and 5%
+            sample_sizes = [
+                int((n_tokens // 2e6)),
+                int((n_tokens // 20e6)),
+            ]
+        self.subsample_sizes: list[int] = [int(n_tokens // 1e6)] + sample_sizes
 
     def __convert_to_binary(self) -> None:
         if (
             not self.force_overwrite
-            and all((self.binary_path / split).exists() for split in self.splits)
+            and all(path.exists() for path in self.split_paths)
             and self.serialized() == self.load_yaml(self.binary_path)
         ):
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
@@ -198,7 +247,6 @@ class DataHandler(BaseConfig):
                             name=self.hf_data_subset_name,
                             split=split,
                             data_files=self.hf_data_files,
-                            streaming=False,
                             cache_dir=str(self.cache_dir),
                         )
                         .filter(self.filter_function)
@@ -252,6 +300,59 @@ class DataHandler(BaseConfig):
 
         return dataset_splits
 
+    def write_subsamples(self, nlp_dataset: bool = True, block_size: int = 2048) -> None:
+        self._set_split_paths(False)
+        self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
+        self._set_split_paths(True)
+        dataset = self.datasets[self.splits[0]]
+
+        for sample_size in self.subsample_sizes[1:]:
+            subsample_out_path = (
+                self.bin_data_path
+                / self.hf_dataset_id
+                / f"{self.hf_data_subset_name}_{int(sample_size)}M"
+                / self.splits[0]
+            )
+            if (
+                not self.force_overwrite
+                and subsample_out_path.exists()
+                and self.serialized() == self.load_yaml(subsample_out_path)
+            ):
+                continue
+            block_size = dataset[0].shape[0]
+            max_input = int(1e6 * sample_size // block_size)
+            inputs = list(range(max_input))
+            # print(f"Inputs: {inputs}")
+            print(sample_size)
+            print(max_input)
+
+            def subsample_(indices: list[int] | int, dataset: StreamingDataset) -> torch.Tensor:
+                # TODO: not very optimized
+                if isinstance(indices, int):
+                    yield dataset[indices]
+                else:
+                    yield torch.cat([dataset[i] for i in indices])
+
+            compress_fn = partial(subsample_, dataset=dataset)
+
+            optimize(
+                fn=compress_fn,
+                inputs=inputs,
+                output_dir=str(subsample_out_path),
+                chunk_bytes="64MB",
+                batch_size=1024,
+            )
+            self.write_yaml(subsample_out_path.parent)
+
+    def get_dataset(self, binary_path: Path, nlp_dataset: bool = True, block_size: int = 2048) -> StreamingDataset:
+        item_loader = None
+        if nlp_dataset:
+            from litdata.streaming.item_loader import TokensLoader
+
+            item_loader = TokensLoader(block_size=block_size + 1)
+
+        return StreamingDataset(input_dir=str(binary_path), item_loader=item_loader, shuffle=True, seed=self.seed)
+
     def load_datasets(
         self,
         nlp_dataset: bool = True,
@@ -266,15 +367,10 @@ class DataHandler(BaseConfig):
         """
         # TODO: write a helper function to combine multiple datasets with `CombinedStreamingDataset` if necessary
         self.__convert_to_binary()
-        item_loader = None
-        if nlp_dataset:
-            from litdata.streaming.item_loader import TokensLoader
 
-            item_loader = TokensLoader(block_size=block_size + 1)
-
-        for split in self.splits:
-            self.datasets[split] = StreamingDataset(
-                input_dir=str(self.binary_path / split), item_loader=item_loader, shuffle=True, seed=self.seed
+        for i, split in enumerate(self.splits):
+            self.datasets[split] = self.get_dataset(
+                binary_path=self.split_paths[i], nlp_dataset=nlp_dataset, block_size=block_size
             )
 
     def load_data_loaders(
@@ -299,16 +395,27 @@ class DataHandler(BaseConfig):
 if __name__ == "__main__":
     data_handler = DataHandler(
         hf_dataset_id="wikitext",
-        hf_data_subset_name="wikitext-2-v1",
+        hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
-        force_overwrite=True,
+        # force_overwrite=True,
         force_splits=True,
+        subsample_index=1,
     )
-
+    # data_handler.write_subsamples()
+    # TODO: improve subsampling interface
+    # TODO: Refactor the post_init and DataHandler
     data_handler.load_data_loaders()
+    s = 0
     print(len(data_handler.data_loaders["train"]))
-
     for batch in data_handler.data_loaders["train"]:
-        print(batch.shape)
-        print("=" * 50)
+        s_ = batch.shape[0] * batch.shape[1]
+        s += s_
+    print(s)
+
+    s = 0
+    print(len(data_handler.data_loaders["test"]))
+    for batch in data_handler.data_loaders["test"]:
+        s_ = batch.shape[0] * batch.shape[1]
+        s += s_
+    print(s)
