@@ -44,7 +44,6 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         result_dict = main(
             fabric=fabric,
             data=data,
-            lr_details=lr_details,
             out_dir=pipeline_directory / "output",
             hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
             load_model_from_path=previous_pipeline_directory / "output",

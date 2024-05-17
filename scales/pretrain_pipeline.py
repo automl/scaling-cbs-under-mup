@@ -29,7 +29,7 @@ from scales.utils import load_checkpoint, save_checkpoint
 def main(
     fabric: L.Fabric,
     data: DataHandler,
-    lr_details: BaseLR,
+    lr_details: BaseLR | None = None,
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
     nbr_steps_to_validate: int = 5,
@@ -103,7 +103,6 @@ def main(
         max_train_steps=max_train_steps,
         max_train_tokens=max_train_tokens,
         nbr_steps_to_validate=nbr_steps_to_validate,
-        lr_details=lr_details,
     )
     fabric.print(f"Train time: {(time.perf_counter() - train_time):.3f}s")
 
@@ -114,7 +113,7 @@ def main(
 
 def init_state(
     fabric: L.Fabric,
-    lr_details: BaseLR,
+    lr_details: BaseLR | None = None,
     hparams: dict | None = None,
     load_model_from_path: str | Path | None = None,
     model_name: str | None = None,
@@ -144,7 +143,11 @@ def init_state(
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT(config)
+        lr_details = states["lr_details"]
         model.load_state_dict(states["model"])
+
+    if lr_details is None:
+        raise ValueError("Please provide an appropriate learning rate configuration.")
 
     model = fabric.setup(model)
 
@@ -161,6 +164,7 @@ def init_state(
 
     states["model"] = model
     states["optimizer"] = optimizer
+    states["lr_details"] = lr_details
 
     return states
 
@@ -173,7 +177,6 @@ def train(
     val_dataloader: DataLoader,
     max_val_steps: int,
     max_seq_length: int,
-    lr_details: BaseLR,
     nbr_steps_to_validate: int = 5,
     max_train_steps: int | None = None,
     max_train_tokens: int | None = None,
@@ -194,7 +197,7 @@ def train(
             break
 
         for param_group in states["optimizer"].param_groups:
-            param_group["lr"] = lr_details.get_lr(states["train_steps"], optimizer=states["optimizer"])
+            param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
