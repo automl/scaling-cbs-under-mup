@@ -76,7 +76,7 @@ class WarmupSchedulerLR(WarmupLR):
         if self.max_decay_steps and self._decay_counter >= self.max_decay_steps:
             self._strict_optim_lr_use = False
             return False
-        if self.start_decay_at_step and step < self.start_decay_at_step:
+        if self.start_decay_at_step and step < self.start_decay_at_step or step == 0:
             self._strict_optim_lr_use = True
             return False
         self._strict_optim_lr_use = False
