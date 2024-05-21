@@ -2,6 +2,7 @@ from pathlib import Path
 
 import lightning as L
 
+from scales.args import LoggingArgs
 from scales.data_utils import DataHandler, preprocess_wikitext
 from scales.eval_pipeline import EvalHandler
 from scales.lr_utils import ExponetialWarmupSchedulerLR
@@ -10,7 +11,7 @@ from scales.pretrain_pipeline import main
 if __name__ == "__main__":
     fabric = L.Fabric(devices="auto", strategy="auto")
 
-    model_dir = Path(__file__).parent.parent / "output"
+    model_dir = Path(__file__).parent / "output"
 
     data = DataHandler(
         hf_dataset_id="wikitext",
@@ -22,7 +23,7 @@ if __name__ == "__main__":
 
     lr_details = ExponetialWarmupSchedulerLR(
         init_lr=0.002,
-        decay_rate=0.75,
+        decay_rate=0.95,
         min_lr=5e-5,
         max_warmup_steps=150,
         start_decay_at_step=1000,
@@ -32,6 +33,7 @@ if __name__ == "__main__":
         fabric=fabric,
         data=data,
         lr_details=lr_details,
+        logging=LoggingArgs(train_loss=True, validation_loss=True, learning_rate=True, log_step=4),
         hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1028},
         max_train_steps=2000,
         max_val_steps=2,

@@ -20,7 +20,9 @@ import torch.nn as nn
 from litgpt.model import GPT, Config
 from litgpt.utils import CycleIterator, init_out_dir, num_parameters
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
+from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
 from scales.lr_utils import BaseLR
 from scales.utils import load_checkpoint, save_checkpoint
@@ -29,6 +31,7 @@ from scales.utils import load_checkpoint, save_checkpoint
 def main(
     fabric: L.Fabric,
     data: DataHandler,
+    logging: LoggingArgs = LoggingArgs(),
     lr_details: BaseLR | None = None,
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
@@ -45,6 +48,9 @@ def main(
 ) -> dict:
     fabric.seed_everything(seed)
     out_dir = init_out_dir(out_dir)
+
+    if logging.log_dir is None:
+        logging.log_dir = out_dir / "runs"
 
     states = init_state(
         fabric=fabric,
@@ -103,6 +109,7 @@ def main(
         max_train_steps=max_train_steps,
         max_train_tokens=max_train_tokens,
         nbr_steps_to_validate=nbr_steps_to_validate,
+        logging=logging,
     )
     fabric.print(f"Train time: {(time.perf_counter() - train_time):.3f}s")
 
@@ -177,6 +184,7 @@ def train(
     val_dataloader: DataLoader,
     max_val_steps: int,
     max_seq_length: int,
+    logging: LoggingArgs,
     nbr_steps_to_validate: int = 5,
     max_train_steps: int | None = None,
     max_train_tokens: int | None = None,
@@ -186,6 +194,9 @@ def train(
         raise ValueError("One of `max_train_steps` or `max_train_tokens` should be set.")
     if max_train_tokens and max_train_steps:
         raise ValueError("Only one of `max_train_steps` or `max_train_tokens` can be set.")
+
+    if logging.should_log():
+        writer = SummaryWriter(log_dir=logging.log_dir)
 
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
@@ -198,6 +209,10 @@ def train(
 
         for param_group in states["optimizer"].param_groups:
             param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
+            if logging.learning_rate and states["train_steps"] % logging.log_step == 0:
+                writer.add_scalar(
+                    tag="Learning Rate", scalar_value=param_group["lr"], global_step=states["train_steps"]
+                )
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
@@ -217,6 +232,9 @@ def train(
         states["train_tokens"] += tokens_per_step
         fabric.print(f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}")
 
+        if logging.train_loss and states["train_steps"] % logging.log_step == 0:
+            writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
+
         if states["train_steps"] % nbr_steps_to_validate == 0 or states["train_steps"] == 0:
             val_loss = validate(
                 fabric,
@@ -227,7 +245,13 @@ def train(
             )
             fabric.print(f"Validation Loss: {val_loss}")
 
+            if logging.validation_loss and states["train_steps"] % logging.log_step == 0:
+                writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
+
         states["train_steps"] += 1
+
+    if logging.train_loss:
+        writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
 
     final_val_loss = validate(
         fabric,
@@ -237,6 +261,9 @@ def train(
         max_val_steps,
     )
     fabric.print(f"Final Validation Loss: {final_val_loss}")
+
+    if logging.validation_loss:
+        writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
 
     return final_val_loss
 

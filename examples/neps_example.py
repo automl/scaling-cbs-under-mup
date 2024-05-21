@@ -4,7 +4,9 @@ from typing import Any
 
 import lightning as L
 import neps
+from neps.utils.common import get_initial_directory
 
+from scales.args import LoggingArgs
 from scales.data_utils import DataHandler, preprocess_wikitext
 from scales.lr_utils import ConstantLR
 from scales.pretrain_pipeline import main
@@ -29,11 +31,18 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
 
     lr_details = ConstantLR(init_lr=hparams["lr"])
 
+    initial_directory = get_initial_directory(pipeline_directory) / "runs"
+
+    logging = LoggingArgs(
+        train_loss=True, validation_loss=True, learning_rate=True, log_step=1, log_dir=initial_directory
+    )
+
     if previous_pipeline_directory is None:
         result_dict = main(
             fabric=fabric,
             data=data,
             lr_details=lr_details,
+            logging=logging,
             out_dir=pipeline_directory / "output",
             hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
             model_config_file="model.yaml",
@@ -44,6 +53,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         result_dict = main(
             fabric=fabric,
             data=data,
+            logging=logging,
             out_dir=pipeline_directory / "output",
             hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
             load_model_from_path=previous_pipeline_directory / "output",
