@@ -19,14 +19,11 @@ if __name__ == "__main__":
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
         force_splits=True,
+        subsample_index=0,
     )
 
     lr_details = ExponetialWarmupSchedulerLR(
-        init_lr=0.002,
-        decay_rate=0.95,
-        min_lr=5e-5,
-        max_warmup_steps=150,
-        start_decay_at_step=1000,
+        init_lr=0.01, decay_rate=None, min_lr=5e-6, max_warmup_steps=150, start_decay_at_step=1500, max_decay_steps=500
     )
 
     result_dict = main(
@@ -34,7 +31,7 @@ if __name__ == "__main__":
         data=data,
         lr_details=lr_details,
         logging=LoggingArgs(train_loss=True, validation_loss=True, learning_rate=True, log_step=4),
-        hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1028},
+        hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1024},
         max_train_steps=2000,
         max_val_steps=2,
         out_dir=model_dir,
