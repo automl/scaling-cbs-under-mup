@@ -265,6 +265,8 @@ def train(
     if logging.validation_loss:
         writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
 
+    writer.close()
+
     return final_val_loss
 
 
