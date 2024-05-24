@@ -207,6 +207,8 @@ def train(
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
 
+        states["optimizer"].zero_grad()
+
         for param_group in states["optimizer"].param_groups:
             param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
             if logging.learning_rate and states["train_steps"] % logging.log_step == 0:
@@ -226,8 +228,17 @@ def train(
 
         # update weights
         fabric.backward(loss)
+
+        if logging.global_gradient_norm and states["train_steps"] % logging.log_step == 0:
+            total_norm = 0
+            parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
+            for p in parameters:
+                param_norm = p.grad.detach().data.norm(2)
+                total_norm += param_norm.item() ** 2
+            total_norm = total_norm**0.5
+            writer.add_scalar(tag="Global Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+
         states["optimizer"].step()
-        states["optimizer"].zero_grad()
 
         states["train_tokens"] += tokens_per_step
         fabric.print(f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}")
@@ -252,6 +263,15 @@ def train(
 
     if logging.train_loss:
         writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
+
+    if logging.global_gradient_norm:
+        total_norm = 0
+        parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
+        for p in parameters:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+        total_norm = total_norm**0.5
+        writer.add_scalar(tag="Global Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
     final_val_loss = validate(
         fabric,

@@ -30,7 +30,9 @@ if __name__ == "__main__":
         fabric=fabric,
         data=data,
         lr_details=lr_details,
-        logging=LoggingArgs(train_loss=True, validation_loss=True, learning_rate=True, log_step=4),
+        logging=LoggingArgs(
+            train_loss=True, validation_loss=True, learning_rate=True, global_gradient_norm=True, log_step=4
+        ),
         hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1024},
         max_train_steps=2000,
         max_val_steps=2,
