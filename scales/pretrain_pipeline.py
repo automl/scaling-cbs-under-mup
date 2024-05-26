@@ -221,6 +221,10 @@ def train(
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
         logits = states["model"](input_ids)
 
+        if logging.output_logits_mean and states["train_steps"] % logging.log_step == 0:
+            logits_mean = logits.mean().item()
+            writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
+
         logits = logits.reshape(-1, logits.size(-1))
         targets = targets.reshape(-1)
 
@@ -229,14 +233,14 @@ def train(
         # update weights
         fabric.backward(loss)
 
-        if logging.global_gradient_norm and states["train_steps"] % logging.log_step == 0:
+        if logging.total_gradient_norm and states["train_steps"] % logging.log_step == 0:
             total_norm = 0
             parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
             for p in parameters:
                 param_norm = p.grad.detach().data.norm(2)
                 total_norm += param_norm.item() ** 2
             total_norm = total_norm**0.5
-            writer.add_scalar(tag="Global Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+            writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
         states["optimizer"].step()
 
@@ -264,14 +268,18 @@ def train(
     if logging.train_loss:
         writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
 
-    if logging.global_gradient_norm:
+    if logging.output_logits_mean:
+        logits_mean = logits.mean().item()
+        writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
+
+    if logging.total_gradient_norm:
         total_norm = 0
         parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
         for p in parameters:
             param_norm = p.grad.detach().data.norm(2)
             total_norm += param_norm.item() ** 2
         total_norm = total_norm**0.5
-        writer.add_scalar(tag="Global Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+        writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
     final_val_loss = validate(
         fabric,

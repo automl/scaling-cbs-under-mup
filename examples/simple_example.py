@@ -31,7 +31,12 @@ if __name__ == "__main__":
         data=data,
         lr_details=lr_details,
         logging=LoggingArgs(
-            train_loss=True, validation_loss=True, learning_rate=True, global_gradient_norm=True, log_step=4
+            train_loss=True,
+            validation_loss=True,
+            learning_rate=True,
+            total_gradient_norm=True,
+            output_logits_mean=True,
+            log_step=4,
         ),
         hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1024},
         max_train_steps=2000,
