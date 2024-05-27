@@ -207,14 +207,15 @@ def train(
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
+    cumulative_time = 0.0
+
     for batch in train_iterator:
         if max_train_steps is not None and states["train_steps"] >= max_train_steps:
             break
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
 
-        if states["train_steps"] == 0:
-            start_time = time.time()
+        start_time = time.time()
 
         states["optimizer"].zero_grad()
 
@@ -256,13 +257,18 @@ def train(
 
         states["optimizer"].step()
 
-        if states["train_steps"] == 0:
-            batch_time = time.time() - start_time
-            throughput = tokens_per_step / batch_time
-            fabric.print(f"Batch Time: {batch_time}, Throughput: {throughput}")
+        batch_time = time.time() - start_time
+        cumulative_time += batch_time
+
+        # Calculate running average throughput
+        avg_batch_time = cumulative_time / (states["train_steps"] + 1)
+        avg_throughput = tokens_per_step / avg_batch_time
 
         states["train_tokens"] += tokens_per_step
-        fabric.print(f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}")
+        fabric.print(
+            f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}"
+            f" - Batch Time: {batch_time} - Average Throughput: {avg_throughput}"
+        )
 
         if logging.train_loss and states["train_steps"] % logging.log_step == 0:
             writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
