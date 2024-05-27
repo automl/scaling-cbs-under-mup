@@ -41,6 +41,7 @@ if __name__ == "__main__":
         hparams={"weight_decay": 0.001, "batch_size": 4, "block_size": 1024},
         max_train_steps=2000,
         max_val_steps=2,
+        max_norm=1.0,
         out_dir=model_dir,
         model_config_file=Path(__file__).parent / "model.yaml",
     )

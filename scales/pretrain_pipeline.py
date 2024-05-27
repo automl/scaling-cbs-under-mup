@@ -36,6 +36,8 @@ def main(
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
     nbr_steps_to_validate: int = 5,
+    max_norm: float | int | None = None,
+    clip_val: float | int | None = None,
     load_model_from_path: str | Path | None = None,
     max_train_steps: int | None = None,
     max_val_steps: int = 5,
@@ -110,6 +112,8 @@ def main(
         max_train_tokens=max_train_tokens,
         nbr_steps_to_validate=nbr_steps_to_validate,
         logging=logging,
+        max_norm=max_norm,
+        clip_val=clip_val,
     )
     fabric.print(f"Train time: {(time.perf_counter() - train_time):.3f}s")
 
@@ -186,6 +190,8 @@ def train(
     max_seq_length: int,
     logging: LoggingArgs,
     nbr_steps_to_validate: int = 5,
+    max_norm: float | int | None = None,
+    clip_val: float | int | None = None,
     max_train_steps: int | None = None,
     max_train_tokens: int | None = None,
 ) -> torch.Tensor:
@@ -229,6 +235,9 @@ def train(
         targets = targets.reshape(-1)
 
         loss = nn.functional.cross_entropy(logits, targets)
+
+        if max_norm is not None or clip_val is not None:
+            fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
 
         # update weights
         fabric.backward(loss)
