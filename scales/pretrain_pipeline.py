@@ -213,6 +213,9 @@ def train(
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
 
+        if states["train_steps"] == 0:
+            start_time = time.time()
+
         states["optimizer"].zero_grad()
 
         for param_group in states["optimizer"].param_groups:
@@ -252,6 +255,11 @@ def train(
             writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
         states["optimizer"].step()
+
+        if states["train_steps"] == 0:
+            batch_time = time.time() - start_time
+            throughput = tokens_per_step / batch_time
+            fabric.print(f"Batch Time: {batch_time}, Throughput: {throughput}")
 
         states["train_tokens"] += tokens_per_step
         fabric.print(f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}")
