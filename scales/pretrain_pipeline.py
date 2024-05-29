@@ -25,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
 from scales.lr_utils import BaseLR
-from scales.utils import load_checkpoint, save_checkpoint
+from scales.utils import load_checkpoint, save_checkpoint, total_gradient_norm
 
 
 def main(
@@ -240,19 +240,14 @@ def train(
 
         loss = nn.functional.cross_entropy(logits, targets)
 
-        if max_norm is not None or clip_val is not None:
-            fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
-
         # update weights
         fabric.backward(loss)
 
+        if max_norm is not None or clip_val is not None:
+            fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
+
         if logging.total_gradient_norm and states["train_steps"] % logging.log_step == 0:
-            total_norm = 0
-            parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
-            for p in parameters:
-                param_norm = p.grad.detach().data.norm(2)
-                total_norm += param_norm.item() ** 2
-            total_norm = total_norm**0.5
+            total_norm = total_gradient_norm(states["model"])
             writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
         states["optimizer"].step()
@@ -296,12 +291,7 @@ def train(
         writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
 
     if logging.total_gradient_norm:
-        total_norm = 0
-        parameters = [p for p in states["model"].parameters() if p.grad is not None and p.requires_grad]
-        for p in parameters:
-            param_norm = p.grad.detach().data.norm(2)
-            total_norm += param_norm.item() ** 2
-        total_norm = total_norm**0.5
+        total_norm = total_gradient_norm(states["model"])
         writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
 
     final_val_loss = validate(
