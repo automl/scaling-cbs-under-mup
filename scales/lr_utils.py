@@ -95,8 +95,8 @@ class ExponetialWarmupSchedulerLR(WarmupSchedulerLR):
     def __init__(
         self,
         init_lr: float,
-        decay_rate: float | None,
         min_lr: float = 0,
+        decay_rate: float | None = None,
         max_decay_steps: int | None = None,
         max_warmup_steps: int | None = None,
         start_decay_at_step: int | None = None,
@@ -113,7 +113,6 @@ class ExponetialWarmupSchedulerLR(WarmupSchedulerLR):
             decay_steps = max_decay_steps
             log_rate = (math.log(min_lr) - math.log(init_lr)) / decay_steps
             decay_rate = pow(math.e, log_rate)
-        print(f"decay_rate = {decay_rate}")
         assert decay_rate is not None, "decay_rate can't be None if max_warmup_steps and max_decay_steps are None"
         assert 0 < decay_rate < 1, "`decay_rate` should be between 0 and 1."
         self.decay_rate = decay_rate

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from functools import partial
+from inspect import isclass
 from pathlib import Path
 from types import FunctionType
 from typing import Any
@@ -26,6 +27,8 @@ class BaseConfig:
                 return f"{value.__module__}.{value.__name__}"
             if isinstance(value, Path):
                 return str(value)
+            if isclass(value):
+                return f"{value.__module__}.{value.__name__}"
             return value
 
         return {key: serialize(value) for key, value in asdict(self).items() if key not in self.ignore_fields}
