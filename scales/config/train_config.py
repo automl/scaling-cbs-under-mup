@@ -3,15 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from inspect import Parameter, signature
 from pathlib import Path
-from typing import Type
+from typing import Any, Type
 from warnings import warn
 
 from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters
-from lr_utils import BaseLR, ConstantLR
 
-from scales.config_utils import BaseConfig
+from scales.config.base_config import BaseConfig
+from scales.config.data_config import DataHandler, preprocess_wikitext
+from scales.config.eval_config import EvalHandler
+from scales.lr_utils import BaseLR, ConstantLR
 
 
 def resolve_model_config(
@@ -194,6 +196,42 @@ class TrainConfig(BaseConfig):
             max_decay_steps=self.max_decay_steps,
         )
 
+    @classmethod
+    def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
+        yaml_config["model_config"] = Config(**yaml_config["model_config"])
+        return cls(**yaml_config)
+
+
+@dataclass
+class PipelineConfig(BaseConfig):
+    data_config_path: Path | None = None
+    train_config_path: Path | None = None
+    eval_config_path: Path | None = None
+
+    data_config: DataHandler | None = None
+    train_config: TrainConfig | None = None
+    eval_config: EvalHandler | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.data_config is None and self.data_config_path and self.data_config_path.exists():
+            self.data_config = DataHandler.from_path(path=self.data_config_path)  # type: ignore
+        if self.train_config is None and self.train_config_path and self.train_config_path.exists():
+            self.train_config = TrainConfig.from_path(path=self.train_config_path)  # type: ignore
+        if self.eval_config is None and self.eval_config_path and self.eval_config_path.exists():
+            self.eval_config = EvalHandler.from_path(path=self.eval_config_path)  # type: ignore
+
+        assert self.data_config is not None
+        assert self.train_config is not None
+        self.data_config.block_size = self.train_config.block_size
+
+    @classmethod
+    def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
+        yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
+        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
+        yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
+        return cls(**yaml_config)
+
 
 if __name__ == "__main__":
     conf = TrainConfig(
@@ -210,7 +248,34 @@ if __name__ == "__main__":
     conf.write_yaml(
         output_dir=Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output")
     )
+    data_handler = DataHandler(
+        hf_dataset_id="wikitext",
+        hf_data_subset_name="wikitext-2-v1",
+        tokenizer_repo_id="openai-community/gpt2",
+        preprocess_fn=preprocess_wikitext,
+        force_overwrite=True,
+        force_splits=True,
+        subsample_index=0,
+    )
+    data_handler.load_data_loaders()
+    config = TrainConfig.from_path(
+        path=Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output")
+    )
+    print(config)
 
+    c = PipelineConfig(
+        data_config_path=Path(
+            "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/data/binaries/wikitext/wikitext-2-v1/DataHandler.yaml"
+        ),
+        train_config_path=Path(
+            "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output/TrainConfig.yaml"
+        ),
+        eval_config_path=Path(
+            "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output/evaluate/EvalHandler.yaml"
+        ),
+    )
+
+    c.write_yaml(Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output"))
 
 # class PipelineConfig:
 #     def __init__(self, DataConfig, TrainConfig, EvalConfig):

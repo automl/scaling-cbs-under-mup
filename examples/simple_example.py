@@ -3,8 +3,8 @@ from pathlib import Path
 import lightning as L
 
 from scales.args import LoggingArgs
-from scales.data_utils import DataHandler, preprocess_wikitext
-from scales.eval_pipeline import EvalHandler
+from scales.config.data_config import DataHandler, preprocess_wikitext
+from scales.config.eval_config import EvalHandler
 from scales.lr_utils import ExponetialWarmupSchedulerLR
 from scales.pretrain_pipeline import main
 

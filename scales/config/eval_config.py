@@ -17,7 +17,7 @@ from pathlib import Path
 
 import lightning as L
 
-from scales.config_utils import BaseConfig
+from scales.config.base_config import BaseConfig
 from scales.eval_utils import convert_and_evaluate
 
 

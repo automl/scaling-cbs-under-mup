@@ -7,7 +7,7 @@ import neps
 from neps.utils.common import get_initial_directory
 
 from scales.args import LoggingArgs
-from scales.data_utils import DataHandler, preprocess_wikitext
+from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.lr_utils import ConstantLR
 from scales.pretrain_pipeline import main
 

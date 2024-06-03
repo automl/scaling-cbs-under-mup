@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from scales.args import LoggingArgs
-from scales.data_utils import DataHandler
+from scales.config.data_config import DataHandler
 from scales.lr_utils import BaseLR
 from scales.utils import load_checkpoint, save_checkpoint, total_gradient_norm
 
