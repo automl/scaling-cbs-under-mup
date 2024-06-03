@@ -4,8 +4,6 @@ started.
 Current missing features:
 
 - No precision editing from fabric
-- No logger (only to terminal)
-- No grad accumulation
 
 """
 
@@ -18,9 +16,8 @@ import lightning as L
 import torch
 import torch.nn as nn
 from litgpt.model import GPT, Config
-from litgpt.utils import CycleIterator, init_out_dir, num_parameters
+from litgpt.utils import CycleIterator, init_out_dir, num_parameters, parse_devices
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
@@ -34,8 +31,11 @@ def main(
     logging: LoggingArgs = LoggingArgs(),
     lr_details: BaseLR | None = None,
     out_dir: Path = Path(__file__).parent.parent / "output",
-    hparams: dict = {"weight_decay": 0.02, "batch_size": 64, "block_size": 2048},
+    hparams: dict = {"weight_decay": 0.02, "block_size": 2048},
+    macro_batch_size: int = 4,
+    micro_batch_size: int | None = None,
     nbr_steps_to_validate: int = 5,
+    devices: int | str = "auto",
     max_norm: float | int | None = None,
     clip_val: float | int | None = None,
     load_model_from_path: str | Path | None = None,
@@ -48,11 +48,32 @@ def main(
     model_config_file: str | Path | None = None,
     seed: int = 1337,
 ) -> dict:
+    fabric.launch()
     fabric.seed_everything(seed)
-    out_dir = init_out_dir(out_dir)
+
+    if fabric.global_rank == 0:
+        out_dir = init_out_dir(out_dir)
 
     if logging.log_dir is None:
         logging.log_dir = out_dir / "runs"
+
+    device_count = parse_devices(devices=devices)
+    if fabric.global_rank == 0:
+        fabric.print(f"Device count:{device_count}")
+        fabric.print(f"Current strategy {fabric.strategy}")
+
+    assert macro_batch_size % device_count == 0, "The macro batch size should be divisible by device count!"
+    mini_batch_size = int(macro_batch_size / device_count)
+
+    if micro_batch_size is not None:
+        assert micro_batch_size > 0, "The `micro_batch_size` should be a positive integer!"
+        assert mini_batch_size % micro_batch_size == 0, "mini batch size should be divisible by micro batch size!"
+        accumulation_iters = int(mini_batch_size / micro_batch_size)
+    else:
+        micro_batch_size = mini_batch_size
+        accumulation_iters = 1
+    if fabric.global_rank == 0:
+        fabric.print(f"Accumulation iterations required:{accumulation_iters}")
 
     states = init_state(
         fabric=fabric,
@@ -64,7 +85,6 @@ def main(
     )
 
     model = states["model"]
-    batch_size = hparams.get("batch_size", 64)
     block_size = hparams.get("block_size", 2048)
 
     trainable_params = num_parameters(model, requires_grad=True)
@@ -75,19 +95,21 @@ def main(
     if tokens_per_param:
         max_train_tokens = tokens_per_param * trainable_params
 
-    fabric.print(f"Number of trainable parameters: {trainable_params:,}")
+    if fabric.global_rank == 0:
+        fabric.print(f"Number of trainable parameters: {trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders(batch_size=batch_size, block_size=block_size)
+    data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size)
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]
 
     train_dataloader, val_dataloader = fabric.setup_dataloaders(train_dataloader, val_dataloader)
-    fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
-    fabric.print(f"Steps for validation: {len(val_dataloader)}")
+    if fabric.global_rank == 0:
+        fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
+        fabric.print(f"Steps for validation: {len(val_dataloader)}")
 
-    tokens_per_step = batch_size * block_size
+    tokens_per_step = macro_batch_size * block_size
     max_data_tokens = len(train_dataloader) * tokens_per_step
 
     if force_unique_tokens:
@@ -114,10 +136,13 @@ def main(
         logging=logging,
         max_norm=max_norm,
         clip_val=clip_val,
+        accumulation_iters=accumulation_iters,
     )
-    fabric.print(f"Train time: {(time.perf_counter() - train_time):.3f}s")
+    fabric.print(f"Device {fabric.global_rank} - Train Time: {(time.perf_counter() - train_time):.3f}s")
 
-    save_checkpoint(fabric, states, out_dir)
+    fabric.barrier()
+    if fabric.global_rank == 0:
+        save_checkpoint(fabric, states, out_dir)
 
     return {"val_loss": val_loss}
 
@@ -190,6 +215,7 @@ def train(
     max_seq_length: int,
     logging: LoggingArgs,
     nbr_steps_to_validate: int = 5,
+    accumulation_iters: int = 1,
     max_norm: float | int | None = None,
     clip_val: float | int | None = None,
     max_train_steps: int | None = None,
@@ -201,13 +227,12 @@ def train(
     if max_train_tokens and max_train_steps:
         raise ValueError("Only one of `max_train_steps` or `max_train_tokens` can be set.")
 
-    if logging.should_log():
-        writer = SummaryWriter(log_dir=logging.log_dir)
-
-    # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
+    loop_iters = 0
+    device_running_loss = 0
 
-    cumulative_time = 0.0
+    # wait for all processes
+    fabric.barrier()
 
     for batch in train_iterator:
         if max_train_steps is not None and states["train_steps"] >= max_train_steps:
@@ -215,84 +240,53 @@ def train(
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
 
-        start_time = time.time()
-
-        states["optimizer"].zero_grad()
+        is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
         for param_group in states["optimizer"].param_groups:
             param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
-            if logging.learning_rate and states["train_steps"] % logging.log_step == 0:
-                writer.add_scalar(
-                    tag="Learning Rate", scalar_value=param_group["lr"], global_step=states["train_steps"]
-                )
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
-        logits = states["model"](input_ids)
 
-        if logging.output_logits_mean and states["train_steps"] % logging.log_step == 0:
-            logits_mean = logits.mean().item()
-            writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
+        # synchronizes the gradients only after accumulation for speed
+        with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
+            logits = states["model"](input_ids)
+            logits = logits.reshape(-1, logits.size(-1))
+            targets = targets.reshape(-1)
+            loss = nn.functional.cross_entropy(logits, targets)
+            fabric.backward(loss / accumulation_iters)
+            device_running_loss += loss.item() / accumulation_iters
 
-        logits = logits.reshape(-1, logits.size(-1))
-        targets = targets.reshape(-1)
-
-        loss = nn.functional.cross_entropy(logits, targets)
-
-        # update weights
-        fabric.backward(loss)
-
-        if max_norm is not None or clip_val is not None:
-            fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
-
-        if logging.total_gradient_norm and states["train_steps"] % logging.log_step == 0:
-            total_norm = total_gradient_norm(states["model"])
-            writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
-
-        states["optimizer"].step()
-
-        batch_time = time.time() - start_time
-        cumulative_time += batch_time
-
-        # Calculate running average throughput
-        avg_batch_time = cumulative_time / (states["train_steps"] + 1)
-        avg_throughput = tokens_per_step / avg_batch_time
-
-        states["train_tokens"] += tokens_per_step
-        fabric.print(
-            f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Loss {loss}"
-            f" - Batch Time: {batch_time} - Average Throughput: {avg_throughput}"
-        )
-
-        if logging.train_loss and states["train_steps"] % logging.log_step == 0:
-            writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
-
-        if states["train_steps"] % nbr_steps_to_validate == 0 or states["train_steps"] == 0:
-            val_loss = validate(
-                fabric,
-                states["model"],
-                val_dataloader,
-                max_seq_length,
-                max_val_steps,
+        if accumulation_iters > 1:
+            gr_norm = total_gradient_norm(states["model"])
+            fabric.print(
+                f"Loop Iteration {loop_iters} - Device {fabric.global_rank} - Micro Batch Loss {loss.item()} "
+                f"- GR Norm {gr_norm}"
             )
-            fabric.print(f"Validation Loss: {val_loss}")
 
-            if logging.validation_loss and states["train_steps"] % logging.log_step == 0:
-                writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
-
-        states["train_steps"] += 1
-
-    if logging.train_loss:
-        writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
-
-    if logging.output_logits_mean:
-        logits_mean = logits.mean().item()
-        writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
-
-    if logging.total_gradient_norm:
-        total_norm = total_gradient_norm(states["model"])
-        writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+        if not is_accumulating:
+            if max_norm is not None or clip_val is not None:
+                fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
+            gr_norm = total_gradient_norm(states["model"])
+            states["optimizer"].step()
+            states["optimizer"].zero_grad()
+            states["train_tokens"] += tokens_per_step
+            fabric.print(
+                f"Train Step {states['train_steps']} - Device {fabric.global_rank} - "
+                f"Loss {device_running_loss} - GR Norm {gr_norm}"
+            )
+            # get the mean loss from all devices
+            loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
+            if fabric.global_rank == 0:
+                fabric.print(
+                    f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
+                )
+            states["train_steps"] += 1
+            device_running_loss = 0
+            loop_iters = 0
+        else:
+            loop_iters += 1
 
     final_val_loss = validate(
         fabric,
@@ -302,11 +296,6 @@ def train(
         max_val_steps,
     )
     fabric.print(f"Final Validation Loss: {final_val_loss}")
-
-    if logging.validation_loss:
-        writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
-
-    writer.close()
 
     return final_val_loss
 
