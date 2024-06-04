@@ -1,11 +1,5 @@
 """This is a custom implementation for pretraining language models with litgpt and a simple version for getting
-started.
-
-Current missing features:
-
-- No precision editing from fabric
-
-"""
+started."""
 
 import time
 import warnings
@@ -22,7 +16,7 @@ from torch.utils.data import DataLoader
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
 from scales.lr_utils import BaseLR
-from scales.utils import load_checkpoint, save_checkpoint, total_gradient_norm
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -58,9 +52,9 @@ def main(
         logging.log_dir = out_dir / "runs"
 
     device_count = parse_devices(devices=devices)
-    if fabric.global_rank == 0:
-        fabric.print(f"Device count:{device_count}")
-        fabric.print(f"Current strategy {fabric.strategy}")
+
+    fabric.print(f"Device count:{device_count}")
+    fabric.print(f"Current strategy {fabric.strategy}")
 
     assert macro_batch_size % device_count == 0, "The macro batch size should be divisible by device count!"
     mini_batch_size = int(macro_batch_size / device_count)
@@ -72,8 +66,8 @@ def main(
     else:
         micro_batch_size = mini_batch_size
         accumulation_iters = 1
-    if fabric.global_rank == 0:
-        fabric.print(f"Accumulation iterations required:{accumulation_iters}")
+
+    fabric.print(f"Accumulation iterations required:{accumulation_iters}")
 
     states = init_state(
         fabric=fabric,
@@ -95,8 +89,7 @@ def main(
     if tokens_per_param:
         max_train_tokens = tokens_per_param * trainable_params
 
-    if fabric.global_rank == 0:
-        fabric.print(f"Number of trainable parameters: {trainable_params:,}")
+    fabric.print(f"Number of trainable parameters: {trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
     data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size)
@@ -105,9 +98,9 @@ def main(
     val_dataloader = data.data_loaders["validation"]
 
     train_dataloader, val_dataloader = fabric.setup_dataloaders(train_dataloader, val_dataloader)
-    if fabric.global_rank == 0:
-        fabric.print(f"Steps for training an epoch: {len(train_dataloader)}")
-        fabric.print(f"Steps for validation: {len(val_dataloader)}")
+
+    fabric.print(f"Steps for training an epoch per device: {len(train_dataloader)}")
+    fabric.print(f"Steps for validation per device: {len(val_dataloader)}")
 
     tokens_per_step = macro_batch_size * block_size
     max_data_tokens = len(train_dataloader) * tokens_per_step
@@ -119,7 +112,7 @@ def main(
         ):
             raise ValueError(f"Training on Unique tokens can't be guaranteed available tokens: {max_data_tokens}")
 
-    train_time = time.perf_counter()
+    start_time = time.time()
 
     # Training and Validation
     val_loss = train(
@@ -138,11 +131,16 @@ def main(
         clip_val=clip_val,
         accumulation_iters=accumulation_iters,
     )
-    fabric.print(f"Device {fabric.global_rank} - Train Time: {(time.perf_counter() - train_time):.3f}s")
+    end_time = time.time() - start_time
+    print(f"Device {fabric.global_rank} - Train Time: {(end_time):.3f}s")
+    avg_train_time = fabric.all_reduce(torch.tensor(end_time), reduce_op="mean")
+    fabric.print(f"The average training time is {(avg_train_time):.3f}s")
 
     fabric.barrier()
-    if fabric.global_rank == 0:
-        save_checkpoint(fabric, states, out_dir)
+    save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
+
+    if fabric.device.type == "cuda":
+        fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
     return {"val_loss": val_loss}
 
@@ -230,6 +228,7 @@ def train(
     train_iterator = CycleIterator(train_dataloader)
     loop_iters = 0
     device_running_loss = 0
+    cumulative_time = 0
 
     # wait for all processes
     fabric.barrier()
@@ -239,6 +238,9 @@ def train(
             break
         if max_train_tokens is not None and states["train_tokens"] >= max_train_tokens:
             break
+
+        if loop_iters == 0:
+            start_time = time.time()
 
         is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
@@ -258,35 +260,44 @@ def train(
             fabric.backward(loss / accumulation_iters)
             device_running_loss += loss.item() / accumulation_iters
 
-        if accumulation_iters > 1:
-            gr_norm = total_gradient_norm(states["model"])
-            fabric.print(
-                f"Loop Iteration {loop_iters} - Device {fabric.global_rank} - Micro Batch Loss {loss.item()} "
-                f"- GR Norm {gr_norm}"
-            )
+        if accumulation_iters > 1 or fabric.world_size > 1:
+            print(f"Loop Iteration {loop_iters} - Device {fabric.global_rank} - Micro Batch Loss {loss.item()} ")
 
         if not is_accumulating:
             if max_norm is not None or clip_val is not None:
                 fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
-            gr_norm = total_gradient_norm(states["model"])
             states["optimizer"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
-            fabric.print(
-                f"Train Step {states['train_steps']} - Device {fabric.global_rank} - "
-                f"Loss {device_running_loss} - GR Norm {gr_norm}"
-            )
+            end_time = time.time()
+
+            total_batch_time = fabric.all_reduce(torch.tensor(end_time - start_time), reduce_op="mean")
+            current_throughput = tokens_per_step / total_batch_time
+
+            cumulative_time += total_batch_time
+            avg_batch_time = cumulative_time / (states["train_steps"] + 1)
+            avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
-            if fabric.global_rank == 0:
-                fabric.print(
-                    f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
-                )
+            fabric.print(
+                f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
+                f" - Current Throughput {current_throughput} - Avg Throughput {avg_throughput}"
+            )
             states["train_steps"] += 1
             device_running_loss = 0
             loop_iters = 0
         else:
             loop_iters += 1
+
+        if (states["train_steps"] % nbr_steps_to_validate == 0 or states["train_steps"] == 1) and not is_accumulating:
+            val_loss = validate(
+                fabric,
+                states["model"],
+                val_dataloader,
+                max_seq_length,
+                max_val_steps,
+            )
+            fabric.print(f"Validation Loss: {val_loss}")
 
     final_val_loss = validate(
         fabric,
@@ -328,7 +339,8 @@ def validate(
         # if no break is taken
         fabric.print(f"Validation data is exhausted in {step} steps")
 
-    val_loss = torch.stack(val_losses).mean()
+    val_loss = torch.stack(val_losses).mean().detach().item()
+    total_val_loss = fabric.all_reduce(torch.tensor(val_loss), reduce_op="mean")
     model.train()
     fabric.barrier()
-    return val_loss
+    return total_val_loss
