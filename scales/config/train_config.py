@@ -168,7 +168,6 @@ class TrainConfig(BaseConfig):
     seed: int = 444
 
     def __post_init__(self) -> None:
-        super().__post_init__()
         self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
         self.model_config = resolve_model_config(
             self.model_config, self.model_checkpoint_dir, self.model_config_path, self.model_name
@@ -213,7 +212,6 @@ class PipelineConfig(BaseConfig):
     eval_config: EvalHandler | None = None
 
     def __post_init__(self) -> None:
-        super().__post_init__()
         if self.data_config is None and self.data_config_path and self.data_config_path.exists():
             self.data_config = DataHandler.from_path(path=self.data_config_path)  # type: ignore
         if self.train_config is None and self.train_config_path and self.train_config_path.exists():
@@ -253,7 +251,7 @@ if __name__ == "__main__":
         hf_data_subset_name="wikitext-2-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
-        force_overwrite=True,
+        force_overwrite=False,
         force_splits=True,
         subsample_index=0,
     )
@@ -274,6 +272,7 @@ if __name__ == "__main__":
             "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output/evaluate/EvalHandler.yaml"
         ),
     )
+    print(c)
 
     c.write_yaml(Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output"))
 

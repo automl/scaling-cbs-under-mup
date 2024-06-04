@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import dataclasses
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 import yaml
 from yaml_utils import (
@@ -20,6 +21,14 @@ from yaml_utils import (
 
 from scales.lr_utils import BaseLR
 
+
+def get_field_default(field: dataclasses.Field) -> Any:
+    # A horrible way of getting the default values
+    if not isinstance(field.default_factory, type(dataclasses.MISSING)):
+        return field.default_factory()  # type: ignore
+    return field.default
+
+
 T = TypeVar("T")
 
 
@@ -27,31 +36,32 @@ T = TypeVar("T")
 class BaseConfig(Generic[T]):
     """Base class to load and save yaml files for configurations."""
 
-    def __post_init__(self) -> None:
-        self.ignore_fields: list[str] = []
+    ignore_fields: ClassVar[list[str]] = []
 
-    def serialized(self) -> dict[str, Any]:
-        # TODO: make the class reconstructable from the yaml file
-        # TODO: Add some custom tags to do this
-        # def serialize(value: Any) -> Any:
-        #     if isinstance(value, partial):
-        #         return {"function": f"{value.func.__module__}.{value.func.__name__}", "kwargs": value.keywords}
-        #     if isinstance(value, FunctionType):
-        #         return f"!fun {value.__module__}.{value.__name__}"
-        #     if isinstance(value, Path):
-        #         return str(value)
-        #     if isclass(value):
-        #         return f"!class {value.__module__}.{value.__name__}"
-        #     return value
+    def to_dict(self, ignore_defaults: bool = False) -> dict[str, Any]:
+        dict_ = {}
+        for field in fields(self):
+            key = field.name
+            value = getattr(self, key)
 
-        return {key: value for key, value in asdict(self).items() if key not in self.ignore_fields}
+            default = get_field_default(field)
+
+            # if not in ignored fields and (ignore_defaults --> inequality_check)
+            if key not in self.ignore_fields and (default != value or not ignore_defaults):
+                dict_[key] = value
+                # To handle the Edge cases of having dataclasses as fields
+                if issubclass(type(value), BaseConfig):
+                    dict_[key] = value.to_dict(ignore_defaults=ignore_defaults)
+                elif is_dataclass(value):
+                    dict_[key] = asdict(value)
+        return dict_
 
     def write_yaml(self, output_dir: Path) -> None:
-        ser_dict = self.serialized()
+        config = self.to_dict(ignore_defaults=True)
         yaml_path = output_dir / f"{type(self).__name__}.yaml"
         print(f"Saving Configration at {str(yaml_path)}")
         with yaml_path.open("w", encoding="utf-8") as yaml_file:
-            yaml.dump(ser_dict, yaml_file, Dumper=self.yaml_dumper())
+            yaml.dump(config, yaml_file, Dumper=self.yaml_dumper())
 
     @staticmethod
     def yaml_loader() -> type[yaml.SafeLoader]:
@@ -72,14 +82,23 @@ class BaseConfig(Generic[T]):
         return dumper
 
     @classmethod
-    def load_yaml(cls, output_dir: Path) -> dict[str, Any]:
+    def load_yaml(cls, output_dir: Path, include_defaults: bool = False) -> dict[str, Any]:
         yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{cls.__name__}.yaml"
         if yaml_path.exists():
             with yaml_path.open(encoding="utf-8") as yaml_file:
                 loader: type[yaml.SafeLoader] = cls.yaml_loader()
-                return yaml.load(yaml_file, Loader=loader)  # noqa S506
+                yaml_config = yaml.load(yaml_file, Loader=loader)  # noqa S506
         else:
-            return {}
+            yaml_config = {}
+
+        # Used for comparing configs in DataHandler
+        # Can do without
+        if include_defaults:
+            for field in fields(cls):
+                if field.name not in yaml_config and field.name not in cls.ignore_fields:
+                    yaml_config[field.name] = get_field_default(field)
+
+        return yaml_config
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> BaseConfig:

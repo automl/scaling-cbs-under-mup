@@ -89,7 +89,6 @@ class DataHandler(BaseConfig):
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
-        super().__post_init__()
         self.ignore_fields.append("force_overwrite")
         self.ignore_fields.append("subsample_index")
         self.ignore_fields.extend(["nlp_dataset", "block_size"])
@@ -140,12 +139,10 @@ class DataHandler(BaseConfig):
         self.subsample_sizes: list[int] = [int(n_tokens // 1e6)] + sample_sizes
 
     def __convert_to_binary(self) -> None:
-        print(self.serialized())
-        print(self.load_yaml(self.binary_path))
         if (
             not self.force_overwrite
             and all(path.exists() for path in self.split_paths)
-            and self.serialized() == self.load_yaml(self.binary_path)
+            and self.to_dict() == self.load_yaml(self.binary_path, include_defaults=True)
         ):
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
@@ -260,7 +257,7 @@ class DataHandler(BaseConfig):
             if (
                 not self.force_overwrite
                 and subsample_out_path.exists()
-                and self.serialized() == self.load_yaml(subsample_out_path)
+                and self.to_dict() == self.load_yaml(subsample_out_path)
             ):
                 continue
             block_size = dataset[0].shape[0]
