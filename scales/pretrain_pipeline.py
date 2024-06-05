@@ -15,15 +15,15 @@ from torch.utils.data import DataLoader
 
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
-from scales.lr_utils import BaseLR
+from scales.lr_utils import LRDetails
 from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
     fabric: L.Fabric,
     data: DataHandler,
+    lr_details: LRDetails,
     logging: LoggingArgs = LoggingArgs(),
-    lr_details: BaseLR | None = None,
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "block_size": 2048},
     macro_batch_size: int = 4,
@@ -147,7 +147,7 @@ def main(
 
 def init_state(
     fabric: L.Fabric,
-    lr_details: BaseLR | None = None,
+    lr_details: LRDetails,
     hparams: dict | None = None,
     load_model_from_path: str | Path | None = None,
     model_name: str | None = None,
@@ -177,7 +177,6 @@ def init_state(
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT(config)
-        lr_details = states["lr_details"]
         model.load_state_dict(states["model"])
 
     if lr_details is None:
@@ -188,6 +187,14 @@ def init_state(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr_details.init_lr, weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
     )
+
+    if lr_details.lr_scheduler is not None:
+        scheduler = lr_details.instantiate_lr_scheduler(optimizer)
+        if len(states) != 0:
+            scheduler.load_state_dict(states["lr_details"])
+    else:
+        scheduler = None
+
     if len(states) != 0:
         optimizer.load_state_dict(states["optimizer"])
     optimizer = fabric.setup_optimizers(optimizer)
@@ -198,7 +205,7 @@ def init_state(
 
     states["model"] = model
     states["optimizer"] = optimizer
-    states["lr_details"] = lr_details
+    states["lr_details"] = scheduler
 
     return states
 
@@ -244,9 +251,6 @@ def train(
 
         is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
-        for param_group in states["optimizer"].param_groups:
-            param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
-
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
@@ -267,6 +271,11 @@ def train(
             if max_norm is not None or clip_val is not None:
                 fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
             states["optimizer"].step()
+            for param_group in states["optimizer"].param_groups:
+                current_lr = param_group["lr"]
+                fabric.print(f"The current learning rate is {current_lr}")
+            if states["lr_details"] is not None:
+                states["lr_details"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
             end_time = time.time()

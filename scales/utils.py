@@ -11,7 +11,7 @@ def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path) -
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     fabric.print(f"Saving state to {str(checkpoint_dir)}")
     fabric.save(Path(checkpoint_dir / "lit_model.pth"), state)
-    print(checkpoint_dir.parent)
+    fabric.print(checkpoint_dir.parent)
     if fabric.global_rank == 0:
         save_config(state["model"].config, checkpoint_dir)
 

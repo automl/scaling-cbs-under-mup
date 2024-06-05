@@ -4,7 +4,7 @@ import lightning as L
 
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler, preprocess_wikitext
-from scales.lr_utils import ConstantLR
+from scales.lr_utils import LRDetails
 from scales.pretrain_pipeline import main
 
 if __name__ == "__main__":
@@ -21,7 +21,7 @@ if __name__ == "__main__":
         subsample_index=0,
     )
 
-    lr_details = ConstantLR(init_lr=0.01)
+    lr_details = LRDetails(init_lr=0.01, lr_scheduler="ExponentialLR", gamma=0.5)
 
     result_dict = main(
         fabric=fabric,
