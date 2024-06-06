@@ -26,8 +26,8 @@ def main(
     logging: LoggingArgs = LoggingArgs(),
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "block_size": 2048},
-    macro_batch_size: int = 4,
-    micro_batch_size: int | None = None,
+    accumulation_iters: int = 1,
+    micro_batch_size: int = 8,
     nbr_steps_to_validate: int = 5,
     devices: int | str = "auto",
     max_norm: float | int | None = None,
@@ -56,18 +56,8 @@ def main(
     fabric.print(f"Device count:{device_count}")
     fabric.print(f"Current strategy {fabric.strategy}")
 
-    assert macro_batch_size % device_count == 0, "The macro batch size should be divisible by device count!"
-    mini_batch_size = int(macro_batch_size / device_count)
-
-    if micro_batch_size is not None:
-        assert micro_batch_size > 0, "The `micro_batch_size` should be a positive integer!"
-        assert mini_batch_size % micro_batch_size == 0, "mini batch size should be divisible by micro batch size!"
-        accumulation_iters = int(mini_batch_size / micro_batch_size)
-    else:
-        micro_batch_size = mini_batch_size
-        accumulation_iters = 1
-
-    fabric.print(f"Accumulation iterations required:{accumulation_iters}")
+    effective_batch_size = device_count * accumulation_iters * micro_batch_size
+    fabric.print(f"Effective batch size for this setup is {effective_batch_size}")
 
     states = init_state(
         fabric=fabric,
@@ -102,7 +92,7 @@ def main(
     fabric.print(f"Steps for training an epoch per device: {len(train_dataloader)}")
     fabric.print(f"Steps for validation per device: {len(val_dataloader)}")
 
-    tokens_per_step = macro_batch_size * block_size
+    tokens_per_step = effective_batch_size * block_size
     max_data_tokens = len(train_dataloader) * tokens_per_step
 
     if force_unique_tokens:
