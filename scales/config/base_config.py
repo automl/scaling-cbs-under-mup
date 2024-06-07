@@ -5,10 +5,11 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import yaml
-from yaml_utils import (
+
+from scales.config.yaml_utils import (
     function_constructor,
     function_representer,
     partial_constructor,
@@ -18,7 +19,6 @@ from yaml_utils import (
     type_constructor,
     type_representer,
 )
-
 from scales.lr_utils import BaseLR
 
 
@@ -36,7 +36,8 @@ T = TypeVar("T")
 class BaseConfig(Generic[T]):
     """Base class to load and save yaml files for configurations."""
 
-    ignore_fields: ClassVar[list[str]] = []
+    def __post_init__(self) -> None:
+        self.ignore_fields: list[str] = []
 
     def to_dict(self, ignore_defaults: bool = False) -> dict[str, Any]:
         dict_ = {}
@@ -56,9 +57,9 @@ class BaseConfig(Generic[T]):
                     dict_[key] = asdict(value)
         return dict_
 
-    def write_yaml(self, output_dir: Path) -> None:
-        config = self.to_dict(ignore_defaults=True)
-        yaml_path = output_dir / f"{type(self).__name__}.yaml"
+    def write_yaml(self, output_dir: Path, ignore_defaults: bool = True) -> None:
+        config = self.to_dict(ignore_defaults=ignore_defaults)
+        yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{type(self).__name__}.yaml"
         print(f"Saving Configration at {str(yaml_path)}")
         with yaml_path.open("w", encoding="utf-8") as yaml_file:
             yaml.dump(config, yaml_file, Dumper=self.yaml_dumper())
@@ -82,23 +83,14 @@ class BaseConfig(Generic[T]):
         return dumper
 
     @classmethod
-    def load_yaml(cls, output_dir: Path, include_defaults: bool = False) -> dict[str, Any]:
+    def load_yaml(cls, output_dir: Path) -> dict[str, Any]:
         yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{cls.__name__}.yaml"
         if yaml_path.exists():
             with yaml_path.open(encoding="utf-8") as yaml_file:
                 loader: type[yaml.SafeLoader] = cls.yaml_loader()
-                yaml_config = yaml.load(yaml_file, Loader=loader)  # noqa S506
+                return yaml.load(yaml_file, Loader=loader)  # noqa S506
         else:
-            yaml_config = {}
-
-        # Used for comparing configs in DataHandler
-        # Can do without
-        if include_defaults:
-            for field in fields(cls):
-                if field.name not in yaml_config and field.name not in cls.ignore_fields:
-                    yaml_config[field.name] = get_field_default(field)
-
-        return yaml_config
+            return {}
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> BaseConfig:

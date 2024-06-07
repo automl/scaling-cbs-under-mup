@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from inspect import Parameter, signature
 from pathlib import Path
 from typing import Any, Type
@@ -10,6 +10,7 @@ from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters
 
+from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
@@ -135,39 +136,61 @@ def resolve_scheduler_params(
 @dataclass
 class TrainConfig(BaseConfig):
     init_lr: float
+    """Initial Learning Rate."""
     batch_size: int
+    """Batch size."""
     block_size: int
+    """Max sequence length/context length/block size."""
     weight_decay: float
+    """Weight Decay for AdamW optimizer."""
     max_val_steps: int
+    """N of validation steps on validation data."""
 
     # model config
     model_config: Config | None = None
+    """Config object for model config."""
     model_config_path: Path | None = None
+    """Config Path for the Config object, ignored if model_config provided."""
     model_checkpoint_dir: Path | None = None
+    """Checkpoint directory for a trained model, ignored if model_config provided.
+
+    NOTE: not used for loading pre-trained models. only for loading Config object
+
+    """
     model_name: str | None = None
+    """Model name to load from HF hub."""
 
     # LR scheduler
     lr_schedule_class: Type[BaseLR] = ConstantLR
+    """Type of the scheduler."""
     start_decay_at_step: int | None = None
+    """Init parameter for scheduler: None for the class default"""
     max_decay_steps: int | None = None
+    """Init parameter for scheduler: None for the class default"""
     max_warmup_steps: int | None = None
+    """Init parameter for scheduler: None for the class default"""
     min_lr: float | None = None
+    """Init parameter for scheduler: None for the class default"""
 
     # training length
     train_steps: int | None = None
+    """Max training steps to train for."""
     tokens_per_param: int | None = None
+    """Used to calculate train_steps if train_steps not provided."""
     max_tokens: int | None = None
-    force_unique_tokens: bool = False
 
     # train details
     max_norm: int | None = None
     clip_val: float | None = None
+    validate_every: int = 5
 
     tracked_metrics: list[str] | None = None
+    log_step: int = 5
 
     seed: int = 444
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
         self.model_config = resolve_model_config(
             self.model_config, self.model_checkpoint_dir, self.model_config_path, self.model_name
@@ -194,6 +217,14 @@ class TrainConfig(BaseConfig):
             start_decay_at_step=self.start_decay_at_step,
             max_decay_steps=self.max_decay_steps,
         )
+        self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics
+
+        logging_args = {field.name: False if field.type is bool else field.default for field in fields(LoggingArgs)}
+        for metric in self.tracked_metrics:
+            if metric in logging_args:
+                logging_args[metric] = True
+
+        self.logging_args = LoggingArgs(**logging_args)  # type: ignore
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
@@ -212,6 +243,7 @@ class PipelineConfig(BaseConfig):
     eval_config: EvalHandler | None = None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.data_config is None and self.data_config_path and self.data_config_path.exists():
             self.data_config = DataHandler.from_path(path=self.data_config_path)  # type: ignore
         if self.train_config is None and self.train_config_path and self.train_config_path.exists():
@@ -248,7 +280,7 @@ if __name__ == "__main__":
     )
     data_handler = DataHandler(
         hf_dataset_id="wikitext",
-        hf_data_subset_name="wikitext-2-v1",
+        hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
         force_overwrite=False,

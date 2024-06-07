@@ -13,6 +13,7 @@ class LoggingArgs:
     log_step: int = 5
     log_dir: str | Path | None = None
 
+    # TODO: can we let LoggingArgs take list of string argnames to track?
     def should_log(self) -> bool:
         if (
             self.train_loss

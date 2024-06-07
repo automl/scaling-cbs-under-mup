@@ -89,6 +89,7 @@ class DataHandler(BaseConfig):
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self.ignore_fields.append("force_overwrite")
         self.ignore_fields.append("subsample_index")
         self.ignore_fields.extend(["nlp_dataset", "block_size"])
@@ -142,7 +143,7 @@ class DataHandler(BaseConfig):
         if (
             not self.force_overwrite
             and all(path.exists() for path in self.split_paths)
-            and self.to_dict() == self.load_yaml(self.binary_path, include_defaults=True)
+            and self.to_dict() == self.load_yaml(self.binary_path)
         ):
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
@@ -174,7 +175,7 @@ class DataHandler(BaseConfig):
                 chunk_bytes="64MB",
                 batch_size=1024,
             )
-        self.write_yaml(self.binary_path)
+        self.write_yaml(self.binary_path, ignore_defaults=False)
 
     def __get_data_splits(self) -> dict[str, Dataset]:
         dataset_splits: dict[str, Any] = {}
@@ -283,7 +284,7 @@ class DataHandler(BaseConfig):
                 chunk_bytes="64MB",
                 batch_size=1024,
             )
-            self.write_yaml(subsample_out_path.parent)
+            self.write_yaml(subsample_out_path.parent, ignore_defaults=False)
 
     def get_dataset(self, binary_path: Path, nlp_dataset: bool = True, block_size: int = 2048) -> StreamingDataset:
         item_loader = None

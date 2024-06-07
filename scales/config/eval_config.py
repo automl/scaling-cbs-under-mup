@@ -46,6 +46,7 @@ class EvalHandler(BaseConfig):
     data_handler_path: Path | None = None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self.model_dir = Path(self.model_dir)
         self.output_dir = self.model_dir / "evaluate"
         self.tokenizer_dir = Path(self.tokenizer_dir)
