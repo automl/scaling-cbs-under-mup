@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from inspect import Parameter, signature
 from pathlib import Path
 from typing import Any, Type
@@ -186,6 +186,7 @@ class TrainConfig(BaseConfig):
 
     tracked_metrics: list[str] | None = None
     log_step: int = 5
+    log_dir: str | Path | None = None
 
     seed: int = 444
 
@@ -217,14 +218,11 @@ class TrainConfig(BaseConfig):
             start_decay_at_step=self.start_decay_at_step,
             max_decay_steps=self.max_decay_steps,
         )
+
         self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics
-
-        logging_args = {field.name: False if field.type is bool else field.default for field in fields(LoggingArgs)}
-        for metric in self.tracked_metrics:
-            if metric in logging_args:
-                logging_args[metric] = True
-
-        self.logging_args = LoggingArgs(**logging_args)  # type: ignore
+        self.logging_args = LoggingArgs(
+            tracked_metrics=self.tracked_metrics, log_step=self.log_step, log_dir=self.log_dir
+        )
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:

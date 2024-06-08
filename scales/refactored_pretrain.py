@@ -20,11 +20,10 @@ import torch.nn as nn
 from litgpt.model import GPT, Config
 from litgpt.utils import CycleIterator, init_out_dir
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
-from scales.utils import load_checkpoint, save_checkpoint, total_gradient_norm
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -38,7 +37,7 @@ def main(
     logging = train_args.logging_args
 
     if logging.log_dir is None:
-        logging.log_dir = out_dir / "runs"
+        logging.update_logdir(out_dir / "logs")
 
     states = init_state(fabric=fabric, train_args=train_args)
 
@@ -129,9 +128,6 @@ def train(
     logging = train_args.logging_args
     tokens_per_step = train_args.block_size * train_args.batch_size
 
-    if logging.should_log():
-        writer = SummaryWriter(log_dir=logging.log_dir)
-
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
@@ -147,19 +143,15 @@ def train(
 
         for param_group in states["optimizer"].param_groups:
             param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
-            if logging.learning_rate and states["train_steps"] % logging.log_step == 0:
-                writer.add_scalar(
-                    tag="Learning Rate", scalar_value=param_group["lr"], global_step=states["train_steps"]
-                )
+
+        logging.learning_rate(optimizer=states["optimizer"], step=states["train_steps"])
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
         logits = states["model"](input_ids)
 
-        if logging.output_logits_mean and states["train_steps"] % logging.log_step == 0:
-            logits_mean = logits.mean().item()
-            writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
+        logging.output_logits_mean(logits, step=states["train_steps"])
 
         logits = logits.reshape(-1, logits.size(-1))
         targets = targets.reshape(-1)
@@ -174,9 +166,7 @@ def train(
                 states["model"], states["optimizer"], max_norm=train_args.max_norm, clip_val=train_args.clip_val
             )
 
-        if logging.total_gradient_norm and states["train_steps"] % logging.log_step == 0:
-            total_norm = total_gradient_norm(states["model"])
-            writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+        logging.total_gradient_norm(model=states["model"], step=states["train_steps"])
 
         states["optimizer"].step()
 
@@ -193,8 +183,7 @@ def train(
             f" - Batch Time: {batch_time} - Average Throughput: {avg_throughput}"
         )
 
-        if logging.train_loss and states["train_steps"] % logging.log_step == 0:
-            writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
+        logging.train_loss(loss, step=states["train_steps"])
 
         if states["train_steps"] % train_args.validate_every == 0 or states["train_steps"] == 0:
             val_loss = validate(
@@ -206,21 +195,15 @@ def train(
             )
             fabric.print(f"Validation Loss: {val_loss}")
 
-            if logging.validation_loss and states["train_steps"] % logging.log_step == 0:
-                writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
+            logging.validation_loss(val_loss, step=states["train_steps"])
 
         states["train_steps"] += 1
 
-    if logging.train_loss:
-        writer.add_scalar(tag="Train Loss", scalar_value=loss, global_step=states["train_steps"])
+    logging.train_loss(loss, step=states["train_steps"], last=True)
 
-    if logging.output_logits_mean:
-        logits_mean = logits.mean().item()
-        writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=states["train_steps"])
+    logging.output_logits_mean(logits, step=states["train_steps"], last=True)
 
-    if logging.total_gradient_norm:
-        total_norm = total_gradient_norm(states["model"])
-        writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=states["train_steps"])
+    logging.total_gradient_norm(states["model"], step=states["train_steps"], last=True)
 
     final_val_loss = validate(
         fabric,
@@ -231,11 +214,9 @@ def train(
     )
     fabric.print(f"Final Validation Loss: {final_val_loss}")
 
-    if logging.validation_loss:
-        writer.add_scalar(tag="Validation Loss", scalar_value=val_loss, global_step=states["train_steps"])
+    logging.validation_loss(val_loss, step=states["train_steps"], last=True)
 
-    if logging.should_log():
-        writer.close()
+    logging.close()
 
     return final_val_loss
 
