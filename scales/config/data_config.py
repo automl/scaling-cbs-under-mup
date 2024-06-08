@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import warnings
 from dataclasses import dataclass, field
 from functools import partial
@@ -13,66 +12,9 @@ from litdata.processing.functions import optimize
 from litdata.streaming.dataloader import StreamingDataLoader
 from litdata.streaming.dataset import StreamingDataset
 from litgpt.tokenizer import Tokenizer
-from torch import Tensor
 
-from scales.config_utils import BaseConfig
-
-
-def download_tokenizer(repo_id: str, root_dir: str | Path, overwrite: bool = False) -> None:
-    """Download the trained tokenizer from the selected HF repo. The tokwenizer will be saved under /root_dir/repo_id.
-
-    Note: To use HF token for authentication set the environment variable HF_TOKEN
-
-    Args:
-    ----
-    repo_id: HuggingFace repository id for the tokenizer to be downloaded from
-    root_dir: path to save the tokenizer under
-
-    """
-    if isinstance(root_dir, str):
-        root_dir = Path(root_dir)
-    if (root_dir / repo_id).exists() and not overwrite:
-        # Tokenizer already exists
-        return
-    from litgpt.scripts.download import download_from_hub
-
-    download_from_hub(repo_id=repo_id, tokenizer_only=True, checkpoint_dir=root_dir, convert_checkpoint=False)
-
-
-def preprocess_wikitext(row: dict[str, str]) -> dict:
-    """Wikitext specific preprocessing, removes new_line at the end of each file."""
-    row["text"] = re.sub(r"\n$", "", row["text"])
-    return row
-
-
-def tokenize_wikitext(indices: list[int] | int, dataset: Dataset, tokenizer: Tokenizer) -> Tensor:
-    """Tokenize each row in the dataset into tensors."""
-    # only yield for now due to a bug on litdata
-    # https://github.com/Lightning-AI/litdata/issues/70
-    if isinstance(indices, int):
-        yield tokenizer.encode(dataset[indices]["text"], eos=True)
-    else:
-        # Yield batches to be fast on large datasets
-        yield torch.cat([tokenizer.encode(dataset[index]["text"], eos=True) for index in indices])
-
-
-# def tokenize_text() -> None:
-#
-#     train_dataset = load_dataset("wikitext", "wikitext-2-v1", split="train").filter(lambda row: len(row["text"]) > 1)
-#     print(len(train_dataset))
-#
-#     repo_id = "meta-llama/Llama-2-7b-hf"
-#     repo_id = "openai-community/gpt2"
-#     path = Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scales-n-arpeggios/data")
-#     out = "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scales-n-arpeggios/out_temp"
-#     download_tokenizer(repo_id=repo_id, root_dir=path)
-#     tokenizer = Tokenizer(path / repo_id)
-#
-#     token_fn = partial(tokenize_wikitext, dataset=train_dataset, tokenizer=tokenizer, prep_fn=preprocess_wikitext)
-#
-#     print(token_fn(0))
-#
-#     optimize(fn=token_fn, inputs=list(range(len(train_dataset))), output_dir=out, chunk_bytes="64MB")
+from scales.config.base_config import BaseConfig
+from scales.config.utils import download_tokenizer, preprocess_wikitext, simple_filter, tokenize_wikitext
 
 
 @dataclass
@@ -100,7 +42,7 @@ class DataHandler(BaseConfig):
     """HuggingFace repository ID for the model which we will use the tokenizer of."""
     hf_data_files: str | None = None
     """HuggingFace dataset data_files."""
-    filter_function: Callable[[dict], bool] = field(default=lambda row: len(row["text"]) > 1)
+    filter_function: Callable[[dict], bool] = simple_filter
     """Filter function to be called on each dataset object immediately after loading."""
     tokenizer_fn: Callable = tokenize_wikitext
     """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`.
@@ -109,7 +51,7 @@ class DataHandler(BaseConfig):
     the corresponding text.
 
     """
-    root_data_path: Path = Path(__file__).parent.parent / "data"
+    root_data_path: Path = Path(__file__).parent.parent.parent / "data"
     """Root folder which holds tokenizers, binaries, cache folders."""
     splits: list[str] = field(default_factory=lambda: ["train", "validation", "test"])
     """Data splits to create or load from hf hub.
@@ -201,7 +143,7 @@ class DataHandler(BaseConfig):
         if (
             not self.force_overwrite
             and all(path.exists() for path in self.split_paths)
-            and self.serialized() == self.load_yaml(self.binary_path)
+            and self.to_dict() == self.load_yaml(self.binary_path)
         ):
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
@@ -233,7 +175,7 @@ class DataHandler(BaseConfig):
                 chunk_bytes="64MB",
                 batch_size=1024,
             )
-        self.write_yaml(self.binary_path)
+        self.write_yaml(self.binary_path, ignore_defaults=False)
 
     def __get_data_splits(self) -> dict[str, Dataset]:
         dataset_splits: dict[str, Any] = {}
@@ -316,7 +258,7 @@ class DataHandler(BaseConfig):
             if (
                 not self.force_overwrite
                 and subsample_out_path.exists()
-                and self.serialized() == self.load_yaml(subsample_out_path)
+                and self.to_dict() == self.load_yaml(subsample_out_path)
             ):
                 continue
             block_size = dataset[0].shape[0]
@@ -342,7 +284,7 @@ class DataHandler(BaseConfig):
                 chunk_bytes="64MB",
                 batch_size=1024,
             )
-            self.write_yaml(subsample_out_path.parent)
+            self.write_yaml(subsample_out_path.parent, ignore_defaults=False)
 
     def get_dataset(self, binary_path: Path, nlp_dataset: bool = True, block_size: int = 2048) -> StreamingDataset:
         item_loader = None
@@ -398,10 +340,11 @@ if __name__ == "__main__":
         hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
-        # force_overwrite=True,
+        force_overwrite=True,
         force_splits=True,
         subsample_index=1,
     )
+    # data_handler = DataHandler.from_path(Path("/data/binaries/wikitext/wikitext-2-v1"))
     # data_handler.write_subsamples()
     # TODO: improve subsampling interface
     # TODO: Refactor the post_init and DataHandler

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import lightning as L
 
-from scales.args import LoggingArgs
-from scales.data_utils import DataHandler, preprocess_wikitext
+from scales.config.data_config import DataHandler, preprocess_wikitext
+from scales.config.eval_config import EvalHandler
 from scales.lr_utils import LRScheduler
 from scales.pretrain_pipeline import main
 
@@ -35,14 +35,6 @@ if __name__ == "__main__":
         fabric=fabric,
         data=data,
         lr_scheduler=lr_scheduler,
-        logging=LoggingArgs(
-            train_loss=True,
-            validation_loss=True,
-            learning_rate=True,
-            total_gradient_norm=True,
-            output_logits_mean=True,
-            log_step=4,
-        ),
         hparams={"weight_decay": 0.001, "block_size": 512},
         max_train_steps=50,
         max_val_steps=2,
@@ -54,3 +46,9 @@ if __name__ == "__main__":
     )
 
     fabric.print(f"Final Validation loss: {result_dict['val_loss']}")
+
+    EvalHandler(
+        model_dir=model_dir,
+        tokenizer_dir=data.tokenizer_root_path / data.tokenizer_repo_id,
+        lm_eval_tasks="mmlu_professional_law",
+    ).evaluate()

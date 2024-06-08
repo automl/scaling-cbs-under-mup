@@ -17,7 +17,7 @@ from pathlib import Path
 
 import lightning as L
 
-from scales.config_utils import BaseConfig
+from scales.config.base_config import BaseConfig
 from scales.eval_utils import convert_and_evaluate
 
 
@@ -49,6 +49,7 @@ class EvalHandler(BaseConfig):
         super().__post_init__()
         self.model_dir = Path(self.model_dir)
         self.output_dir = self.model_dir / "evaluate"
+        self.tokenizer_dir = Path(self.tokenizer_dir)
 
     def evaluate(self) -> None:
         fabric = L.Fabric(devices="auto", strategy="auto")

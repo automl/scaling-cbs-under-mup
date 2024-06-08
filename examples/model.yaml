@@ -3,6 +3,6 @@ block_size: 512
 n_embd: 32
 n_head: 2
 n_layer: 3
-n_query_groups: 2
+n_query_groups: null
 norm_class_name: LayerNorm
 vocab_size: 50257
