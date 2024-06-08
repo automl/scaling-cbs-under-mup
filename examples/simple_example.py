@@ -4,7 +4,7 @@ import lightning as L
 
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler, preprocess_wikitext
-from scales.lr_utils import LRDetails
+from scales.lr_utils import LRScheduler
 from scales.pretrain_pipeline import main
 
 if __name__ == "__main__":
@@ -21,12 +21,20 @@ if __name__ == "__main__":
         subsample_index=0,
     )
 
-    lr_details = LRDetails(init_lr=0.01, lr_scheduler="ExponentialLR", gamma=0.5)
+    lr_scheduler = LRScheduler(
+        init_lr=0.01,
+        end_warmup_step=10,
+        end_decay_step=40,
+        end_cooldown_step=50,
+        lr_scheduler="CosineAnnealingLR",
+        T_max=30,
+        eta_min=5e-4,
+    )
 
     result_dict = main(
         fabric=fabric,
         data=data,
-        lr_details=lr_details,
+        lr_scheduler=lr_scheduler,
         logging=LoggingArgs(
             train_loss=True,
             validation_loss=True,
@@ -36,10 +44,10 @@ if __name__ == "__main__":
             log_step=4,
         ),
         hparams={"weight_decay": 0.001, "block_size": 512},
-        max_train_steps=10,
+        max_train_steps=50,
         max_val_steps=2,
-        accumulation_iters=2,
-        micro_batch_size=4,
+        accumulation_iters=1,
+        micro_batch_size=2,
         max_norm=1.0,
         out_dir=model_dir,
         model_config_file=Path(__file__).parent / "model.yaml",

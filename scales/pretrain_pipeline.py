@@ -15,14 +15,14 @@ from torch.utils.data import DataLoader
 
 from scales.args import LoggingArgs
 from scales.data_utils import DataHandler
-from scales.lr_utils import LRDetails
+from scales.lr_utils import LRScheduler
 from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
     fabric: L.Fabric,
     data: DataHandler,
-    lr_details: LRDetails,
+    lr_scheduler: LRScheduler,
     logging: LoggingArgs = LoggingArgs(),
     out_dir: Path = Path(__file__).parent.parent / "output",
     hparams: dict = {"weight_decay": 0.02, "block_size": 2048},
@@ -56,13 +56,15 @@ def main(
     fabric.print(f"Device count:{device_count}")
     fabric.print(f"Current strategy {fabric.strategy}")
 
+    assert accumulation_iters > 0, "`accumulation_iters` should be a positive integer"
+
     effective_batch_size = device_count * accumulation_iters * micro_batch_size
     fabric.print(f"Effective batch size for this setup is {effective_batch_size}")
 
     states = init_state(
         fabric=fabric,
         hparams=hparams,
-        lr_details=lr_details,
+        lr_scheduler=lr_scheduler,
         load_model_from_path=load_model_from_path,
         model_name=model_name,
         model_config_file=model_config_file,
@@ -137,7 +139,7 @@ def main(
 
 def init_state(
     fabric: L.Fabric,
-    lr_details: LRDetails,
+    lr_scheduler: LRScheduler,
     hparams: dict | None = None,
     load_model_from_path: str | Path | None = None,
     model_name: str | None = None,
@@ -165,25 +167,25 @@ def init_state(
                 "`model_config_file` and `model_name` are ignored"
             )
         states, model_path = load_checkpoint(fabric, load_model_from_path)
+        lr_scheduler = states["lr_scheduler"]
         config = Config.from_file(model_path)
         model = GPT(config)
         model.load_state_dict(states["model"])
 
-    if lr_details is None:
-        raise ValueError("Please provide an appropriate learning rate configuration.")
-
     model = fabric.setup(model)
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
+        model.parameters(), lr=lr_scheduler.init_lr, weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
     )
 
-    if lr_details.lr_scheduler is not None:
-        scheduler = lr_details.instantiate_lr_scheduler(optimizer)
-        if len(states) != 0:
-            scheduler.load_state_dict(states["lr_details"])
+    if lr_scheduler.lr_scheduler is not None:
+        torch_scheduler = lr_scheduler._instantiate_lr_scheduler(
+            optimizer=optimizer, lr_scheduler=lr_scheduler.lr_scheduler, scheduler_args=lr_scheduler.scheduler_args
+        )
     else:
-        scheduler = None
+        torch_scheduler = None
+    if len(states) != 0 and torch_scheduler is not None:
+        torch_scheduler.load_state_dict(states["torch_scheduler"])
 
     if len(states) != 0:
         optimizer.load_state_dict(states["optimizer"])
@@ -195,7 +197,8 @@ def init_state(
 
     states["model"] = model
     states["optimizer"] = optimizer
-    states["lr_details"] = scheduler
+    states["lr_scheduler"] = lr_scheduler
+    states["torch_scheduler"] = torch_scheduler
 
     return states
 
@@ -260,12 +263,10 @@ def train(
         if not is_accumulating:
             if max_norm is not None or clip_val is not None:
                 fabric.clip_gradients(states["model"], states["optimizer"], max_norm=max_norm, clip_val=clip_val)
+            states["lr_scheduler"].step(
+                steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
+            )
             states["optimizer"].step()
-            for param_group in states["optimizer"].param_groups:
-                current_lr = param_group["lr"]
-                fabric.print(f"The current learning rate is {current_lr}")
-            if states["lr_details"] is not None:
-                states["lr_details"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
             end_time = time.time()
