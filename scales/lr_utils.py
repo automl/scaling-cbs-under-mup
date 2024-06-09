@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 from torch.optim.optimizer import Optimizer
 
@@ -14,27 +12,25 @@ class LRScheduler:
         end_warmup_step: int | None = None,
         end_decay_step: int | None = None,
         end_cooldown_step: int | None = None,
-        lr_scheduler: str | None = None,
-        **kwargs: Any,
+        torch_scheduler: str | None = None,
+        torch_scheduler_args: dict | None = None,
     ) -> None:
         self.init_lr = init_lr
         self.min_lr = min_lr
         self.end_warmup_step = (end_warmup_step - 1) if isinstance(end_warmup_step, int) else end_warmup_step
         self.end_decay_step = (end_decay_step - 1) if isinstance(end_decay_step, int) else end_decay_step
         self.end_cooldown_step = (end_cooldown_step - 1) if isinstance(end_cooldown_step, int) else end_cooldown_step
-        self.lr_scheduler = lr_scheduler
-        self.scheduler_args = kwargs
+        self.torch_scheduler = torch_scheduler
+        self.torch_scheduler_args = torch_scheduler_args
 
         self._inital_cooldown_lr: float
         self._cooldown_shift: int = 0
         self._first_cooldown_step: bool = True
 
-    def _instantiate_lr_scheduler(
-        self, optimizer: Optimizer, lr_scheduler: str, scheduler_args: dict
-    ) -> torch.optim.lr_scheduler.LRScheduler:
-        if isinstance(self.lr_scheduler, str):
-            scheduler_cls = getattr(torch.optim.lr_scheduler, self.lr_scheduler)
-            return scheduler_cls(optimizer, **self.scheduler_args)
+    def _instantiate_lr_scheduler(self, optimizer: Optimizer) -> torch.optim.lr_scheduler.LRScheduler:
+        if isinstance(self.torch_scheduler, str):
+            scheduler_cls = getattr(torch.optim.lr_scheduler, self.torch_scheduler)
+            return scheduler_cls(optimizer, **self.torch_scheduler_args)
         raise ValueError("The `lr_scheduler` argument should be a string")
 
     def _get_lr_from_optim(self, optimizer: Optimizer) -> float:

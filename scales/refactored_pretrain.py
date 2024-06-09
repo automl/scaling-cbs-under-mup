@@ -23,6 +23,8 @@ from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
+
+# from scales.lr_utils import LRScheduler
 from scales.utils import load_checkpoint, save_checkpoint
 
 
@@ -91,7 +93,7 @@ def init_state(
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT(config)
-        lr_details = states["lr_details"]
+        train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
 
     if lr_details is None:
@@ -102,6 +104,14 @@ def init_state(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
     )
+
+    if train_args.lr_scheduler.torch_scheduler is not None:
+        torch_scheduler = train_args.lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
+    else:
+        torch_scheduler = None
+    if len(states) != 0 and torch_scheduler is not None:
+        torch_scheduler.load_state_dict(states["torch_scheduler"])
+
     if len(states) != 0:
         optimizer.load_state_dict(states["optimizer"])
     optimizer = fabric.setup_optimizers(optimizer)
@@ -112,7 +122,8 @@ def init_state(
 
     states["model"] = model
     states["optimizer"] = optimizer
-    states["lr_details"] = lr_details
+    states["lr_scheduler"] = train_args.lr_scheduler
+    states["torch_scheduler"] = torch_scheduler
 
     return states
 
@@ -141,9 +152,6 @@ def train(
 
         states["optimizer"].zero_grad()
 
-        for param_group in states["optimizer"].param_groups:
-            param_group["lr"] = states["lr_details"].get_lr(states["train_steps"], optimizer=states["optimizer"])
-
         logging.learning_rate(optimizer=states["optimizer"], step=states["train_steps"])
 
         # Properly adjust the dimensions
@@ -161,13 +169,19 @@ def train(
         # update weights
         fabric.backward(loss)
 
-        if train_args.max_norm is not None or train_args.clip_val is not None:
+        if train_args.clip_max_norm is not None or train_args.clip_max_val is not None:
             fabric.clip_gradients(
-                states["model"], states["optimizer"], max_norm=train_args.max_norm, clip_val=train_args.clip_val
+                states["model"],
+                states["optimizer"],
+                max_norm=train_args.clip_max_norm,
+                clip_val=train_args.clip_max_val,
             )
 
         logging.total_gradient_norm(model=states["model"], step=states["train_steps"])
 
+        states["lr_scheduler"].step(
+            steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
+        )
         states["optimizer"].step()
 
         batch_time = time.time() - start_time

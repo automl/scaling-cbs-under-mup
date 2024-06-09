@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from inspect import Parameter, signature
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 from warnings import warn
 
 from litgpt.config import Config
@@ -14,7 +14,7 @@ from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
-from scales.lr_utils import BaseLR, ConstantLR
+from scales.lr_utils import LRScheduler
 
 
 def resolve_model_config(
@@ -105,17 +105,18 @@ def resolve_train_steps(
 
 def resolve_scheduler_params(
     init_lr: float,
-    lr_schedule_class: Type[BaseLR],
-    min_lr: float | None = None,
-    max_warmup_steps: int | None = None,
-    start_decay_at_step: int | None = None,
-    max_decay_steps: int | None = None,
-) -> BaseLR:
+    min_lr: float = 0,
+    end_decay_step: int | None = None,
+    end_warmup_step: int | None = None,
+    end_cooldown_step: int | None = None,
+    torch_scheduler: str | None = None,
+    torch_scheduler_args: dict | None = None,
+) -> LRScheduler:
     # Get this function args into a dict
     kwargs = {**locals()}
-    _ = kwargs.pop("lr_schedule_class")
+    lr_schedule_class = LRScheduler
 
-    if issubclass(lr_schedule_class, BaseLR):
+    if issubclass(lr_schedule_class, LRScheduler):
         params = signature(lr_schedule_class.__init__).parameters
     else:
         raise ValueError("lr_schedule_class must be a subclass of BaseLR")
@@ -161,16 +162,18 @@ class TrainConfig(BaseConfig):
     """Model name to load from HF hub."""
 
     # LR scheduler
-    lr_schedule_class: Type[BaseLR] = ConstantLR
-    """Type of the scheduler."""
-    start_decay_at_step: int | None = None
+    end_decay_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    max_decay_steps: int | None = None
+    end_warmup_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    max_warmup_steps: int | None = None
+    end_cooldown_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    min_lr: float | None = None
-    """Init parameter for scheduler: None for the class default"""
+    min_lr: float = 0
+    """`min_lr` the scheduler can reach."""
+    torch_scheduler: str | None = None
+    """Torch type scheduler defined in a string."""
+    torch_scheduler_args: dict | None = None
+    """All torch scheduler arguments."""
 
     # training length
     train_steps: int | None = None
@@ -180,8 +183,8 @@ class TrainConfig(BaseConfig):
     max_tokens: int | None = None
 
     # train details
-    max_norm: int | None = None
-    clip_val: float | None = None
+    clip_max_norm: int | None = None
+    clip_max_val: float | None = None
     validate_every: int = 5
 
     tracked_metrics: list[str] | None = None
@@ -212,11 +215,12 @@ class TrainConfig(BaseConfig):
 
         self.lr_scheduler = resolve_scheduler_params(
             init_lr=self.init_lr,
-            lr_schedule_class=self.lr_schedule_class,
             min_lr=self.min_lr,
-            max_warmup_steps=self.max_warmup_steps,
-            start_decay_at_step=self.start_decay_at_step,
-            max_decay_steps=self.max_decay_steps,
+            end_cooldown_step=self.end_cooldown_step,
+            end_decay_step=self.end_decay_step,
+            end_warmup_step=self.end_warmup_step,
+            torch_scheduler=self.torch_scheduler,
+            torch_scheduler_args=self.torch_scheduler_args,
         )
 
         self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics

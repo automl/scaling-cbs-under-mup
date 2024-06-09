@@ -21,6 +21,11 @@ if __name__ == "__main__":
             block_size=1028,
             weight_decay=0.001,
             max_val_steps=2,
+            end_warmup_step=40,
+            end_decay_step=180,
+            end_cooldown_step=200,
+            torch_scheduler="CosineAnnealingLR",
+            torch_scheduler_args={"T_max": 140, "eta_min": 5e-4},
             model_config_path=output_dir.parent / "model.yaml",
             train_steps=200,
         )

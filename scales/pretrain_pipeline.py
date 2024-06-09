@@ -178,10 +178,8 @@ def init_state(
         model.parameters(), lr=lr_scheduler.init_lr, weight_decay=hparams["weight_decay"], betas=(0.9, 0.95)
     )
 
-    if lr_scheduler.lr_scheduler is not None:
-        torch_scheduler = lr_scheduler._instantiate_lr_scheduler(
-            optimizer=optimizer, lr_scheduler=lr_scheduler.lr_scheduler, scheduler_args=lr_scheduler.scheduler_args
-        )
+    if lr_scheduler.torch_scheduler is not None:
+        torch_scheduler = lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
     else:
         torch_scheduler = None
     if len(states) != 0 and torch_scheduler is not None:
