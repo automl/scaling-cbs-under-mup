@@ -1,3 +1,13 @@
+## Dependency management
+
+To be consistent across remote clusters including supercomputing resources, it is recommended to use `venv` instead of `conda`.
+Refer to the [templates here](https://github.com/automl/venv_templates).
+
+For this repo, use [Poetry](https://python-poetry.org/).
+
+Activate the venv environment with a blank requirements file and use Poetry as normal.
+
+
 # TODO: Update this
 # scales-n-arpeggios
 
