@@ -3,18 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from inspect import Parameter, signature
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 from warnings import warn
 
 from litgpt.config import Config
 from litgpt.model import GPT
-from litgpt.utils import num_parameters
+from litgpt.utils import num_parameters, parse_devices
 
 from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
-from scales.lr_utils import BaseLR, ConstantLR
+from scales.lr_utils import LRScheduler
 
 
 def resolve_model_config(
@@ -54,10 +54,12 @@ def resolve_train_steps(
     max_tokens: int | None = None,
     max_train_steps: int | None = None,
     tokens_per_param: int | None = None,
-    batch_size: int | None = None,
+    micro_batch_size: int | None = None,
     block_size: int | None = None,
     trainable_params: int | None = None,
     tokens_per_step: int | None = None,
+    accumulation_iters: int = 1,
+    devices: int | str = "auto",
 ) -> int:
     """3 ways of computing train_steps...
 
@@ -88,15 +90,17 @@ def resolve_train_steps(
                 f"must also be set."
             )
 
+    devices = parse_devices(devices=devices)
+
     if max_tokens:
         if tokens_per_step:
             train_steps = int(max_tokens // tokens_per_step)
-        elif batch_size and block_size:
-            train_steps = int(max_tokens // (batch_size * block_size))
+        elif micro_batch_size and block_size:
+            train_steps = int(max_tokens // (micro_batch_size * block_size * accumulation_iters * devices))
         else:
             raise ValueError(
                 f"Either tokens_per_step="
-                f"{tokens_per_step} or both batch_size={batch_size} "
+                f"{tokens_per_step} or both batch_size={micro_batch_size} "
                 f"and block_size={block_size} must be set with max_tokens={max_tokens}"
             )
 
@@ -105,17 +109,18 @@ def resolve_train_steps(
 
 def resolve_scheduler_params(
     init_lr: float,
-    lr_schedule_class: Type[BaseLR],
-    min_lr: float | None = None,
-    max_warmup_steps: int | None = None,
-    start_decay_at_step: int | None = None,
-    max_decay_steps: int | None = None,
-) -> BaseLR:
+    min_lr: float = 0,
+    end_decay_step: int | None = None,
+    end_warmup_step: int | None = None,
+    end_cooldown_step: int | None = None,
+    torch_scheduler: str | None = None,
+    torch_scheduler_args: dict | None = None,
+) -> LRScheduler:
     # Get this function args into a dict
     kwargs = {**locals()}
-    _ = kwargs.pop("lr_schedule_class")
+    lr_schedule_class = LRScheduler
 
-    if issubclass(lr_schedule_class, BaseLR):
+    if issubclass(lr_schedule_class, LRScheduler):
         params = signature(lr_schedule_class.__init__).parameters
     else:
         raise ValueError("lr_schedule_class must be a subclass of BaseLR")
@@ -137,14 +142,18 @@ def resolve_scheduler_params(
 class TrainConfig(BaseConfig):
     init_lr: float
     """Initial Learning Rate."""
-    batch_size: int
-    """Batch size."""
+    micro_batch_size: int
+    """The batch per iteration."""
     block_size: int
     """Max sequence length/context length/block size."""
     weight_decay: float
     """Weight Decay for AdamW optimizer."""
     max_val_steps: int
     """N of validation steps on validation data."""
+    accumulation_iters: int = 1
+    """Number of accumulation iters per device."""
+    devices: int | str = "auto"
+    """The number of devices to be trained on."""
 
     # model config
     model_config: Config | None = None
@@ -161,16 +170,18 @@ class TrainConfig(BaseConfig):
     """Model name to load from HF hub."""
 
     # LR scheduler
-    lr_schedule_class: Type[BaseLR] = ConstantLR
-    """Type of the scheduler."""
-    start_decay_at_step: int | None = None
+    end_decay_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    max_decay_steps: int | None = None
+    end_warmup_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    max_warmup_steps: int | None = None
+    end_cooldown_step: int | None = None
     """Init parameter for scheduler: None for the class default"""
-    min_lr: float | None = None
-    """Init parameter for scheduler: None for the class default"""
+    min_lr: float = 0
+    """`min_lr` the scheduler can reach."""
+    torch_scheduler: str | None = None
+    """Torch type scheduler defined in a string."""
+    torch_scheduler_args: dict | None = None
+    """All torch scheduler arguments."""
 
     # training length
     train_steps: int | None = None
@@ -180,8 +191,8 @@ class TrainConfig(BaseConfig):
     max_tokens: int | None = None
 
     # train details
-    max_norm: int | None = None
-    clip_val: float | None = None
+    clip_max_norm: int | None = None
+    clip_max_val: float | None = None
     validate_every: int = 5
 
     tracked_metrics: list[str] | None = None
@@ -205,18 +216,21 @@ class TrainConfig(BaseConfig):
             max_tokens=self.max_tokens,
             max_train_steps=self.train_steps,
             tokens_per_param=self.tokens_per_param,
-            batch_size=self.batch_size,
+            micro_batch_size=self.micro_batch_size,
             block_size=self.block_size,
             trainable_params=self.trainable_params,
+            accumulation_iters=self.accumulation_iters,
+            devices=self.devices,
         )
 
         self.lr_scheduler = resolve_scheduler_params(
             init_lr=self.init_lr,
-            lr_schedule_class=self.lr_schedule_class,
             min_lr=self.min_lr,
-            max_warmup_steps=self.max_warmup_steps,
-            start_decay_at_step=self.start_decay_at_step,
-            max_decay_steps=self.max_decay_steps,
+            end_cooldown_step=self.end_cooldown_step,
+            end_decay_step=self.end_decay_step,
+            end_warmup_step=self.end_warmup_step,
+            torch_scheduler=self.torch_scheduler,
+            torch_scheduler_args=self.torch_scheduler_args,
         )
 
         self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics
@@ -264,7 +278,7 @@ class PipelineConfig(BaseConfig):
 if __name__ == "__main__":
     conf = TrainConfig(
         init_lr=0.001,
-        batch_size=1,
+        micro_batch_size=1,
         block_size=1028,
         weight_decay=0.001,
         max_val_steps=2,

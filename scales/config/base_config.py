@@ -19,7 +19,7 @@ from scales.config.yaml_utils import (
     type_constructor,
     type_representer,
 )
-from scales.lr_utils import BaseLR
+from scales.lr_utils import LRScheduler
 
 
 def get_field_default(field: dataclasses.Field) -> Any:
@@ -79,7 +79,7 @@ class BaseConfig(Generic[T]):
         dumper.add_representer(FunctionType, function_representer)
         dumper.add_representer(partial, partial_representer)
         dumper.add_multi_representer(Path, path_representer)
-        dumper.add_multi_representer(type(BaseLR), type_representer)
+        dumper.add_multi_representer(type(LRScheduler), type_representer)
         return dumper
 
     @classmethod

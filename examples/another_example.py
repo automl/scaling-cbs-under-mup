@@ -17,12 +17,24 @@ if __name__ == "__main__":
         # Define your own PipelineConfig
         train_conf = TrainConfig(
             init_lr=0.001,
-            batch_size=1,
+            micro_batch_size=1,
             block_size=1028,
             weight_decay=0.001,
             max_val_steps=2,
+            end_warmup_step=40,
+            end_decay_step=180,
+            end_cooldown_step=200,
+            torch_scheduler="CosineAnnealingLR",
+            torch_scheduler_args={"T_max": 140, "eta_min": 5e-4},
             model_config_path=output_dir.parent / "model.yaml",
             train_steps=200,
+            tracked_metrics=[
+                "train_loss",
+                "validation_loss",
+                "total_gradient_norm",
+                "output_logits_mean",
+                "learning_rate",
+            ],
         )
 
         data_handler = DataHandler(
