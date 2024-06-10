@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 from warnings import warn
 
+import lightning as L
 import torch
 import torch.nn
 from torch.optim import Optimizer
@@ -50,6 +51,7 @@ class LoggingArgs:
         """Function to be called after log_dir change."""
         if self.tracked_metrics:
             self.writer = SummaryWriter(log_dir=self.log_dir)
+            self.total_logits_mean = 0
             # Warn for typos
             _ = [self.get_metric(metric) for metric in self.tracked_metrics]
         else:
@@ -75,9 +77,15 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Learning Rate", scalar_value=optimizer.param_groups[-1]["lr"], global_step=step)
 
     @should_log
-    def output_logits_mean(self, logits: torch.tensor, step: int) -> None:
+    def output_logits_mean(
+        self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
+    ) -> None:
         logits_mean = logits.mean().item()
-        self.writer.add_scalar(tag="Output Logits Mean", scalar_value=logits_mean, global_step=step)
+        self.total_logits_mean += logits_mean / accumulation_iters
+        if not is_accumulating:
+            self.total_logits_mean = fabric.all_reduce(torch.tensor(self.total_logits_mean), reduce_op="mean")
+            self.writer.add_scalar(tag="Output Logits Mean", scalar_value=self.total_logits_mean, global_step=step)
+            self.total_logits_mean = 0
 
     @should_log
     def total_gradient_norm(self, model: torch.nn.Module, step: int) -> None:
