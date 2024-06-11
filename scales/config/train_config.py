@@ -271,7 +271,10 @@ class PipelineConfig(BaseConfig):
     def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
         yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
         yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
-        yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
+        if "eval_config" in yaml_config:
+            yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
+        else:
+            yaml_config["eval_config"] = None
         return cls(**yaml_config)
 
 
