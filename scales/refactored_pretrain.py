@@ -91,7 +91,7 @@ def main(
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
-    return {"val_loss": val_loss}
+    return {"val_loss": val_loss.numpy().tolist()}
 
 
 def init_state(
@@ -260,7 +260,7 @@ def train(
 
     logging.close()
 
-    return val_loss
+    return val_loss.detach().cpu()
 
 
 @torch.no_grad()
