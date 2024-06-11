@@ -93,25 +93,29 @@ class DataHandler(BaseConfig):
         self.ignore_fields.append("force_overwrite")
         self.ignore_fields.append("subsample_index")
         self.ignore_fields.extend(["nlp_dataset", "block_size"])
-        self.tokenizer_root_path = self.root_data_path / "tokenizers"
-        """Root folder where to store all the downloaded tokenizers."""
-        self.bin_data_path = self.root_data_path / "binaries"
-        """Root folder where to store all the tokenized datasets."""
-        self.cache_dir = self.root_data_path / "cache"
-        """Cache directory for huggingface datasets."""
-        # main/parent dataset path
-        self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
+        # add `force_overwrite` key to the ignored fields when writing YAML
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
-        if self.subsample_index:
-            self._get_subsample_sizes()
-            self._set_split_paths(True)
-            if not all(path.exists() for path in self.split_paths):
-                # if any path doesn't exist generate subsample sets first
-                self.write_subsamples(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
-        else:
-            self._set_split_paths(False)
-        # add `force_overwrite` key to the ignored fields when writing YAML
+
+    @property
+    def tokenizer_root_path(self) -> Path:
+        """Root folder where to store all the downloaded tokenizers."""
+        return self.root_data_path / "tokenizers"
+
+    @property
+    def bin_data_path(self) -> Path:
+        """Root folder where to store all the tokenized datasets."""
+        return self.root_data_path / "binaries"
+
+    @property
+    def cache_dir(self) -> Path:
+        """Cache directory for huggingface datasets."""
+        return self.root_data_path / "cache"
+
+    @property
+    def binary_path(self) -> Path:
+        """Main/parent dataset path."""
+        return self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
 
     def _set_split_paths(self, subsample_mode: bool) -> None:
         if subsample_mode:
@@ -127,7 +131,14 @@ class DataHandler(BaseConfig):
     def _get_subsample_sizes(self) -> None:
         # masquerade as the parent dataset here
         self._set_split_paths(False)
-        self.load_datasets(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        # Load datasets
+        self.__convert_to_binary()
+
+        for i, split in enumerate(self.splits):
+            self.datasets[split] = self.get_dataset(
+                binary_path=self.split_paths[i], nlp_dataset=self.nlp_dataset, block_size=self.block_size
+            )
+        # Load end
         dataset = self.datasets[self.splits[0]]
         n_tokens = len(dataset) * dataset[0].shape[0]
         sample_sizes: list[int] = []
@@ -139,12 +150,15 @@ class DataHandler(BaseConfig):
             ]
         self.subsample_sizes: list[int] = [int(n_tokens // 1e6)] + sample_sizes
 
-    def __convert_to_binary(self) -> None:
-        if (
+    def __check_exists(self) -> bool:
+        return (
             not self.force_overwrite
             and all(path.exists() for path in self.split_paths)
             and self.to_dict() == self.load_yaml(self.binary_path)
-        ):
+        )
+
+    def __convert_to_binary(self) -> None:
+        if self.__check_exists():
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
                 f"Dataset {self.hf_dataset_id} already exists at {self.binary_path}.\n"
@@ -244,7 +258,14 @@ class DataHandler(BaseConfig):
 
     def write_subsamples(self, nlp_dataset: bool = True, block_size: int = 2048) -> None:
         self._set_split_paths(False)
-        self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
+        # Load datasets
+        self.__convert_to_binary()
+
+        for i, split in enumerate(self.splits):
+            self.datasets[split] = self.get_dataset(
+                binary_path=self.split_paths[i], nlp_dataset=nlp_dataset, block_size=block_size
+            )
+        # Load end
         self._set_split_paths(True)
         dataset = self.datasets[self.splits[0]]
 
@@ -308,7 +329,15 @@ class DataHandler(BaseConfig):
 
         """
         # TODO: write a helper function to combine multiple datasets with `CombinedStreamingDataset` if necessary
-        self.__convert_to_binary()
+        if self.subsample_index:
+            self._get_subsample_sizes()
+            self._set_split_paths(True)
+            if not self.__check_exists():
+                # if any path doesn't exist generate subsample sets first
+                self.write_subsamples(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        else:
+            self._set_split_paths(False)
+            self.__convert_to_binary()
 
         for i, split in enumerate(self.splits):
             self.datasets[split] = self.get_dataset(
@@ -340,14 +369,13 @@ if __name__ == "__main__":
         hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
-        force_overwrite=True,
+        force_overwrite=False,
         force_splits=True,
-        subsample_index=1,
+        subsample_index=2,
     )
     # data_handler = DataHandler.from_path(Path("/data/binaries/wikitext/wikitext-2-v1"))
     # data_handler.write_subsamples()
     # TODO: improve subsampling interface
-    # TODO: Refactor the post_init and DataHandler
     data_handler.load_data_loaders()
     s = 0
     print(len(data_handler.data_loaders["train"]))
