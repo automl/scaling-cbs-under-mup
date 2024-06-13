@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+import re
 from jsonargparse import CLI
 from lightning import Fabric
+import torch
 
 from scales.config import PipelineConfig
 from scales.refactored_pretrain import main
@@ -50,12 +52,21 @@ def run(
     data_handler = pipe_config.data_config
     train_config = pipe_config.train_config
     # eval_handler = pipe_config.eval_config
+    try:
+        result = main(fabric=fabric, train_args=train_config, data=data_handler, out_dir=output_path)
+        result_path = output_path / "result.yaml"
+        with result_path.open(mode="w", encoding="utf-8") as file:
+            yaml.dump(result, file)
+    except torch.cuda.OutOfMemoryError:
+        # in case of a memory error bump the config to the next config group
+        matching = re.search(r"([^=]+)=([\d]+)", str(config_path.parent.name))
+        folder_prefix, folder_order = matching.group(1), int(matching.group(2))
+        folder_order += 1
 
-    result = main(fabric=fabric, train_args=train_config, data=data_handler, out_dir=output_path)
-
-    result_path = output_path / "result.yaml"
-    with result_path.open(mode="w", encoding="utf-8") as file:
-        yaml.dump(result, file)
+        new_config_folder = config_path.parent.parent / f"{folder_prefix}={folder_order}" 
+        new_config_folder.mkdir(exist_ok=True)
+        new_config_path = new_config_folder / config_path.name
+        config_path = config_path.rename(new_config_path)
 
     if pipe_updated:
         # Write the updated yaml back
