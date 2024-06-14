@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import torch
 import yaml
-import re
 from jsonargparse import CLI
 from lightning import Fabric
-import torch
 
 from scales.config import PipelineConfig
 from scales.refactored_pretrain import main
@@ -16,12 +16,14 @@ def run(
     config_path: str | Path,
     output_root_dir: str | Path,
     data_root_path: str | Path | None = None,
+    access_internet: bool = False,
 ) -> None:
     """Run the configuration, and save results.
 
     :param config_path: Path to the Pipeline config yaml file
     :param data_root_path: Training data tree root path
     :param output_root_dir: output tree root path
+    :param access_internet: Set True to download the data if it doesn't exist, otherwise throw an error
     :return:
 
     """
@@ -44,6 +46,7 @@ def run(
     pipe_updated = False
 
     if data_root_path is not None and pipe_config.data_config.root_data_path != data_root_path:
+        # Update the root path for the data (since it's cluster specific)
         pipe_config.data_config.root_data_path = data_root_path
         pipe_updated = True
 
@@ -53,20 +56,29 @@ def run(
     train_config = pipe_config.train_config
     # eval_handler = pipe_config.eval_config
     try:
-        result = main(fabric=fabric, train_args=train_config, data=data_handler, out_dir=output_path)
+        result = main(
+            fabric=fabric,
+            train_args=train_config,
+            data=data_handler,
+            out_dir=output_path,
+            access_internet=access_internet,
+        )
         result_path = output_path / "result.yaml"
         with result_path.open(mode="w", encoding="utf-8") as file:
             yaml.dump(result, file)
     except torch.cuda.OutOfMemoryError:
         # in case of a memory error bump the config to the next config group
+        # Expected config parent folder name: "some_text=some_number"
         matching = re.search(r"([^=]+)=([\d]+)", str(config_path.parent.name))
-        folder_prefix, folder_order = matching.group(1), int(matching.group(2))
-        folder_order += 1
+        if matching is not None:
+            folder_prefix, folder_order = matching.group(1), int(matching.group(2))
+            folder_order += 1
 
-        new_config_folder = config_path.parent.parent / f"{folder_prefix}={folder_order}" 
-        new_config_folder.mkdir(exist_ok=True)
-        new_config_path = new_config_folder / config_path.name
-        config_path = config_path.rename(new_config_path)
+            # Move the config to the new folder with name "some_text=some_number + 1"
+            new_config_folder = config_path.parent.parent / f"{folder_prefix}={folder_order}"
+            new_config_folder.mkdir(exist_ok=True)
+            new_config_path = new_config_folder / config_path.name
+            config_path = config_path.rename(new_config_path)
 
     if pipe_updated:
         # Write the updated yaml back

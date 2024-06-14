@@ -90,12 +90,17 @@ class DataHandler(BaseConfig):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # ignore fields that doesn't affect dataset installing
         self.ignore_fields.append("force_overwrite")
         self.ignore_fields.append("subsample_index")
         self.ignore_fields.extend(["nlp_dataset", "block_size"])
-        # add `force_overwrite` key to the ignored fields when writing YAML
+        # ignore fields that change based on the environment
+        self.ignore_fields.extend(
+            ["access_internet", "tokenizer_root_path", "bin_data_path", "cache_dir", "binary_path"]
+        )
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
+        self.access_internet: bool = True
 
     @property
     def tokenizer_root_path(self) -> Path:
@@ -166,6 +171,13 @@ class DataHandler(BaseConfig):
                 f"If you would like to prepare the dataset again set the `force_overwrite` flag."
             )
             return
+        # Check if internet available
+        if not self.access_internet:
+            raise ValueError(
+                f"Dataset can not be downloaded when the acccess_internet is {self.access_internet}, "
+                f"please download the dataset to '{self.binary_path}' first,"
+                f" with self.access_internet set to True"
+            )
 
         dataset_splits = self.__get_data_splits()
 
@@ -345,7 +357,12 @@ class DataHandler(BaseConfig):
             )
 
     def load_data_loaders(
-        self, nlp_dataset: bool = True, batch_size: int = 64, block_size: int = 2048, num_workers: int = 1
+        self,
+        nlp_dataset: bool = True,
+        batch_size: int = 64,
+        block_size: int = 2048,
+        num_workers: int = 1,
+        access_internet: bool = True,
     ) -> None:
         """Loads the `StreamingDataLoaders` into `self.data_loaders` dict, keys are `splits`
 
@@ -354,8 +371,10 @@ class DataHandler(BaseConfig):
             batch_size: Batch size for `StreamingDataLoader` (same for all splits)
             block_size: Block size in each batch.
             num_workers: Number of workers for `StreamingDataLoader`
+            access_internet: Enable data downloading
 
         """
+        self.access_internet = access_internet
         self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
             self.data_loaders[split] = StreamingDataLoader(
@@ -371,12 +390,12 @@ if __name__ == "__main__":
         preprocess_fn=preprocess_wikitext,
         force_overwrite=False,
         force_splits=True,
-        subsample_index=2,
+        subsample_index=0,
     )
     # data_handler = DataHandler.from_path(Path("/data/binaries/wikitext/wikitext-2-v1"))
     # data_handler.write_subsamples()
     # TODO: improve subsampling interface
-    data_handler.load_data_loaders()
+    data_handler.load_data_loaders(access_internet=True)
     s = 0
     print(len(data_handler.data_loaders["train"]))
     for batch in data_handler.data_loaders["train"]:
