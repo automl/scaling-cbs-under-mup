@@ -17,6 +17,7 @@ class LRScheduler:
     ) -> None:
         self.init_lr = init_lr
         self.min_lr = min_lr
+        # TODO: use n_steps instead of additive points here to simplify
         self.end_warmup_step = (end_warmup_step - 1) if isinstance(end_warmup_step, int) else end_warmup_step
         self.end_decay_step = (end_decay_step - 1) if isinstance(end_decay_step, int) else end_decay_step
         self.end_cooldown_step = (end_cooldown_step - 1) if isinstance(end_cooldown_step, int) else end_cooldown_step
@@ -52,9 +53,11 @@ class LRScheduler:
     def step(
         self, steps: int, optimizer: Optimizer, scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
     ) -> None:
+        # Warmup
         if self.end_warmup_step is not None and steps <= self.end_warmup_step:
             new_lr = self.init_lr * steps / (self.end_warmup_step)
             self._edit_lr(optimizer, new_lr)
+        # Main
         elif steps != 0 and (self.end_decay_step is None or (self.end_decay_step and steps <= self.end_decay_step)):
             if scheduler is not None:
                 scheduler.step()
@@ -62,6 +65,7 @@ class LRScheduler:
                     self._edit_lr(optimizer, self.min_lr)
             else:
                 return
+        # Cooldown
         elif self.end_cooldown_step and steps <= self.end_cooldown_step:
             if self._first_cooldown_step is True:
                 self._inital_cooldown_lr = self._get_lr_from_optim(optimizer)

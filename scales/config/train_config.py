@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from inspect import Parameter, signature
 from pathlib import Path
 from typing import Any
 from warnings import warn
@@ -109,33 +108,40 @@ def resolve_train_steps(
 
 def resolve_scheduler_params(
     init_lr: float,
+    max_train_steps: int,
     min_lr: float = 0,
-    end_decay_step: int | None = None,
-    end_warmup_step: int | None = None,
-    end_cooldown_step: int | None = None,
+    warmup_steps: int | None = None,
+    main_steps: int | None = None,
+    cooldown_steps: int | None = None,
     torch_scheduler: str | None = None,
     torch_scheduler_args: dict | None = None,
 ) -> LRScheduler:
-    # Get this function args into a dict
-    kwargs = {**locals()}
-    lr_schedule_class = LRScheduler
+    warmup_steps = 0 if warmup_steps is None else warmup_steps
+    cooldown_steps = 0 if cooldown_steps is None else cooldown_steps
+    main_steps = max_train_steps - warmup_steps - cooldown_steps if main_steps is None else main_steps
 
-    if issubclass(lr_schedule_class, LRScheduler):
-        params = signature(lr_schedule_class.__init__).parameters
-    else:
-        raise ValueError("lr_schedule_class must be a subclass of BaseLR")
+    assert (
+        warmup_steps + cooldown_steps + main_steps == max_train_steps
+    ), f"LR args doesn't match max_train_steps = {max_train_steps} != {warmup_steps} + {cooldown_steps} + {main_steps}"
 
-    param_dict = {}
-    for key, val in kwargs.items():
-        if key in params:
-            # NOTE: passing `None` will trigger default value for that parameter
-            param_dict[key] = params[key].default if kwargs[key] is None else kwargs[key]
-            if param_dict[key] is Parameter.empty:
-                raise TypeError(
-                    f"Missing the value for a required positional argument: {key}.\n given arguments: {kwargs}"
-                )
+    end_warmup_step = warmup_steps
+    end_decay_step = warmup_steps + main_steps
+    end_cooldown_step = warmup_steps + main_steps + cooldown_steps
 
-    return lr_schedule_class(**param_dict)
+    # TODO: write an adapter for all torch.optim.LRScheduler classes
+    if torch_scheduler and torch_scheduler == "CosineAnnealingLR":
+        torch_scheduler_args = {} if torch_scheduler_args is None else torch_scheduler_args
+        torch_scheduler_args["T_max"] = main_steps
+
+    return LRScheduler(
+        init_lr=init_lr,
+        min_lr=min_lr,
+        end_decay_step=end_decay_step,
+        end_warmup_step=end_warmup_step,
+        end_cooldown_step=end_cooldown_step,
+        torch_scheduler=torch_scheduler,
+        torch_scheduler_args=torch_scheduler_args,
+    )
 
 
 @dataclass
@@ -170,12 +176,12 @@ class TrainConfig(BaseConfig):
     """Model name to load from HF hub."""
 
     # LR scheduler
-    end_decay_step: int | None = None
-    """Init parameter for scheduler: None for the class default"""
-    end_warmup_step: int | None = None
-    """Init parameter for scheduler: None for the class default"""
-    end_cooldown_step: int | None = None
-    """Init parameter for scheduler: None for the class default"""
+    n_main_steps: int | None = None
+    """Number of steps in the torch main/decay schedule."""
+    n_warmup_steps: int | None = None
+    """Number of steps in the warmup schedule."""
+    n_cooldown_steps: int | None = None
+    """Number of steps in the cooldown schedule."""
     min_lr: float = 0
     """`min_lr` the scheduler can reach."""
     torch_scheduler: str | None = None
@@ -184,7 +190,7 @@ class TrainConfig(BaseConfig):
     """All torch scheduler arguments."""
 
     # training length
-    train_steps: int | None = None
+    max_train_steps: int | None = None
     """Max training steps to train for."""
     tokens_per_param: int | None = None
     """Used to calculate train_steps if train_steps not provided."""
@@ -214,7 +220,7 @@ class TrainConfig(BaseConfig):
 
         self.train_steps = resolve_train_steps(
             max_tokens=self.max_tokens,
-            max_train_steps=self.train_steps,
+            max_train_steps=self.max_train_steps,
             tokens_per_param=self.tokens_per_param,
             micro_batch_size=self.micro_batch_size,
             block_size=self.block_size,
@@ -225,10 +231,11 @@ class TrainConfig(BaseConfig):
 
         self.lr_scheduler = resolve_scheduler_params(
             init_lr=self.init_lr,
+            max_train_steps=self.train_steps,
             min_lr=self.min_lr,
-            end_cooldown_step=self.end_cooldown_step,
-            end_decay_step=self.end_decay_step,
-            end_warmup_step=self.end_warmup_step,
+            cooldown_steps=self.n_cooldown_steps,
+            main_steps=self.n_main_steps,
+            warmup_steps=self.n_warmup_steps,
             torch_scheduler=self.torch_scheduler,
             torch_scheduler_args=self.torch_scheduler_args,
         )
@@ -271,7 +278,7 @@ class PipelineConfig(BaseConfig):
     def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
         yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
         yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
-        if "eval_config" in yaml_config:
+        if yaml_config.get("eval_config"):
             yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
         else:
             yaml_config["eval_config"] = None
@@ -288,7 +295,7 @@ if __name__ == "__main__":
         model_config_path=Path(
             "/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/model.yaml"
         ),
-        train_steps=200,
+        max_train_steps=200,
     )
     conf.write_yaml(
         output_dir=Path("/home/samir/Desktop/Projects/HiWi-AutoML/Thesis/scaling_all_the_way/examples/output")
