@@ -66,7 +66,11 @@ class LRScheduler:
             else:
                 return
         # Cooldown
-        elif self.end_cooldown_step and steps <= self.end_cooldown_step:
+        elif (
+            self.end_cooldown_step
+            and steps <= self.end_cooldown_step
+            and self.end_cooldown_step != self._get_cooldown_shift()
+        ):
             if self._first_cooldown_step is True:
                 self._inital_cooldown_lr = self._get_lr_from_optim(optimizer)
                 self._cooldown_shift = self._get_cooldown_shift()
