@@ -1,3 +1,50 @@
+
+## Setup
+
+
+### Environment
+
+```
+git clone https://github.com/automl/venv_templates.git
+cd venv_templates
+# git checkout meta OR git checkout juwels
+bash setup.sh my_scaling ../envs/
+source activate.sh my_scaling ../envs/
+```
+
+### Supporting repos
+
+`NePS`:
+```
+pip install https://github.com/automl/neps.git
+cd neps/
+pip install -e .
+```
+
+`Lightning-GPT`:
+```
+pip install https://github.com/Lightning-AI/litgpt.git
+cd litgpt/
+pip install -e .
+```
+
+### Install this repo
+
+Setup [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer):
+```bash
+curl -sSL https://install.python-poetry.org | python3.10 -
+```
+
+Install this repo from the base directory:
+
+```
+poetry install
+```
+
+---
+---
+---
+
 # TODO: Update this
 # scales-n-arpeggios
 
