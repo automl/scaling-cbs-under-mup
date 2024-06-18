@@ -8,6 +8,7 @@ from scales.config.train_config import PipelineConfig, TrainConfig
 from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
 
+
 if __name__ == "__main__":
     output_dir = Path(__file__).parent / "output"
 
@@ -21,13 +22,13 @@ if __name__ == "__main__":
             block_size=1028,
             weight_decay=0.001,
             max_val_steps=2,
-            end_warmup_step=40,
-            end_decay_step=180,
-            end_cooldown_step=200,
+            n_warmup_steps=None,
+            n_main_steps=None,
+            n_cooldown_steps=None,
             torch_scheduler="CosineAnnealingLR",
-            torch_scheduler_args={"T_max": 140, "eta_min": 5e-4},
+            torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
             model_config_path=output_dir.parent / "model.yaml",
-            train_steps=200,
+            tokens_per_param=20,
             tracked_metrics=[
                 "train_loss",
                 "validation_loss",

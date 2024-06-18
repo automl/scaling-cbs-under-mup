@@ -33,6 +33,7 @@ def main(
     data: DataHandler,
     train_args: TrainConfig,
     out_dir: Path = Path(__file__).parent.parent / "output",
+    access_internet: bool = True,
 ) -> dict:
     fabric.launch()
     fabric.seed_everything(train_args.seed)
@@ -60,7 +61,7 @@ def main(
     fabric.print(f"Number of trainable parameters: {train_args.trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size)
+    data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size, access_internet=access_internet)
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]
@@ -91,7 +92,7 @@ def main(
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
-    return {"val_loss": val_loss}
+    return {"val_loss": val_loss.numpy().tolist()}
 
 
 def init_state(
@@ -260,7 +261,7 @@ def train(
 
     logging.close()
 
-    return val_loss
+    return val_loss.detach().cpu()
 
 
 @torch.no_grad()

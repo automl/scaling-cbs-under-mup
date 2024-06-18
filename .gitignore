@@ -139,3 +139,6 @@ dmypy.json
 
 # Pycharm files
  .idea/
+
+# yaml files
+*.yaml

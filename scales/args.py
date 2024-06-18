@@ -49,7 +49,7 @@ class LoggingArgs:
 
     def __post_init__(self) -> None:
         """Function to be called after log_dir change."""
-        if self.tracked_metrics:
+        if self.tracked_metrics and self.log_dir:
             self.writer = SummaryWriter(log_dir=self.log_dir)
             self.total_logits_mean = 0
             # Warn for typos

@@ -7,6 +7,7 @@ from scales.config.eval_config import EvalHandler
 from scales.lr_utils import LRScheduler
 from scales.pretrain_pipeline import main
 
+
 if __name__ == "__main__":
     fabric = L.Fabric(devices="auto", strategy="auto", accelerator="auto")
 
@@ -26,9 +27,11 @@ if __name__ == "__main__":
         end_warmup_step=10,
         end_decay_step=40,
         end_cooldown_step=50,
-        lr_scheduler="CosineAnnealingLR",
-        T_max=30,
-        eta_min=5e-4,
+        torch_scheduler="CosineAnnealingLR",
+        torch_scheduler_args=dict(
+            T_max=30,
+            eta_min=5e-4,
+        )
     )
 
     result_dict = main(

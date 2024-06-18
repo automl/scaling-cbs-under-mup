@@ -19,99 +19,121 @@ from scales.config.utils import download_tokenizer, preprocess_wikitext, simple_
 
 @dataclass
 class DataHandler(BaseConfig):
-    """This class defines a dataset and how it was processed, tokenized, split, optimized and saved. When downloading,
-    this class will create an YAML file in the target folder. Later when the Dataset is requested again if the
-    arguments of this class matches the saved configuration in the YAML file the dataset will be loaded, otherwise,
+    """DataHandler class for handling the dataset downloading, processing, and loading.
+    
+    This class defines a dataset and how it was processed, tokenized, split, optimized and saved. 
+    When downloading, this class will create an YAML file in the target folder. 
+    Later when the Dataset is requested again if the arguments of this class matches 
+    the saved configuration in the YAML file the dataset will be loaded, otherwise, 
     it'll download the dataset again.
 
     WARNING: All fields not passed to the `self.ignore_fields` will be checked
 
     """
-
+    # Dataset identifier for the HuggingFace Datasets
     hf_dataset_id: str
-    """Dataset identifier for the HuggingFace Datasets."""
+    
+    # Dataset Subset name for the datasets with multiple subsets
     hf_data_subset_name: str
-    """Dataset Subset name for the datasets with multiple subsets."""
+    
+    # Preprocess Dataset before passing into tokenization, used in `Dataset.map(...)` function
     preprocess_fn: Callable[[dict], dict]
-    """Preprocess Dataset before passing into tokenization.
-
-    To be used in `Dataset.map(...)` function
-
-    """
+    
+    # HuggingFace repository ID for the model which we will use the tokenizer of
     tokenizer_repo_id: str
-    """HuggingFace repository ID for the model which we will use the tokenizer of."""
+    
+    # HuggingFace dataset data_files
     hf_data_files: str | None = None
-    """HuggingFace dataset data_files."""
+    
+    # Filter function to be called on each dataset object immediately after loading
     filter_function: Callable[[dict], bool] = simple_filter
-    """Filter function to be called on each dataset object immediately after loading."""
+
+    # Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`
+    #   Takes in at least a single argument, which is the index (or list of indices) of the dataset
+    #   and returns a tensor for the corresponding text.
     tokenizer_fn: Callable = tokenize_wikitext
-    """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`.
-
-    Takes in at least a single argument, which is the index (or list of indices) of the dataset and returns a tensor for
-    the corresponding text.
-
-    """
+    
+    # Root folder which holds tokenizers, binaries, cache folders
     root_data_path: Path = Path(__file__).parent.parent.parent / "data"
-    """Root folder which holds tokenizers, binaries, cache folders."""
+
+    # Data splits to create or load from hf hub
+    #  If any split other than the 'train' split doesn't exist,
+    #  the loader will try to load all the splits and split them according to the `default_split_ratio`.
+    #  If 'train' split is specified but not found then an exception will occur.
     splits: list[str] = field(default_factory=lambda: ["train", "validation", "test"])
-    """Data splits to create or load from hf hub.
 
-    If any split other than the 'train' split doesn't exist,
-    the loader will try to load all the splits and split them according to the `default_split_ratio`.
-    If 'train' split is specified but not found then an exception will occur
-
-    """
+    # Split ratios for data splits when either a split specified is not found on the hub
+    # or `force_splits` flag is set
     default_split_ratio: list[float] = field(default_factory=lambda: [0.8, 0.1, 0.1])
-    """Split ratios for data splits when either a split specified is not found on the hub or `force_splits` flag is
-    set."""
+    
+    # Forces the loader to load all the splits existing on the hub for the dataset and 
+    # split them according to the `default_split_ratio`
     force_splits: bool = False
-    """Forces the loader to load all the splits existing on the hub for the dataset and split them according to the
-    `default_split_ratio`"""
+    
+    # Forces to process the dataset again if set
     force_overwrite: bool = False
-    """Forces to process the dataset again if set."""
+
+    # `tokenizer_fn` can take multiple arguments if their defaults are specified here
     tokenizer_fn_kwargs: dict[Any, Any] = field(default_factory=dict)
-    """`tokenizer_fn` can take multiple arguments if their defaults are specified here."""
+    
+    # Seed for splitting datasets and shuffling
     seed: int = 42
-    """Seed for splitting datasets and shuffling."""
+
+    # Size of the already subsampled set
+    #   e.g: 4M, 47M, used only for loading not for writing
+    #   Note: valid `subsample_size`s are generated only after the 
+    #   first time `self.write_subsamples` is called
     # subsample_size: str | None = None
-    """Size of the already subsampled set e.g: 4M, 47M, used only for loading not for writing
-    Note: valid `subsample_size`s are generated only after the first time `self.write_subsamples` is called
-    """
+    
+    # Valid subsample size indices are: `0`, `1`, `2`
+    #   `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
     subsample_index: int = 0
-    """Valid subsample size indices are: `0`, `1`, `2`.
-    `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
-    """
+    
+    # Optimize the data loading for nlp datasets (Will be removed in the next iteration)
     nlp_dataset: bool = True
-    """Optimize the data loading for nlp datasets (Will be removed in the next iteration)"""
+
+    # Block size for data loading (Will be removed in the next iteration)
     block_size: int = 2048
-    """Block size for data loading (Will be removed in the next iteration)"""
 
     # TODO: organize filter calls to be consistent
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # ignore fields that doesn't affect dataset installing
         self.ignore_fields.append("force_overwrite")
         self.ignore_fields.append("subsample_index")
         self.ignore_fields.extend(["nlp_dataset", "block_size"])
-        self.tokenizer_root_path = self.root_data_path / "tokenizers"
-        """Root folder where to store all the downloaded tokenizers."""
-        self.bin_data_path = self.root_data_path / "binaries"
-        """Root folder where to store all the tokenized datasets."""
-        self.cache_dir = self.root_data_path / "cache"
-        """Cache directory for huggingface datasets."""
-        # main/parent dataset path
-        self.binary_path = self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
+        # ignore fields that change based on the environment
+        self.ignore_fields.extend(
+            ["access_internet", "tokenizer_root_path", "bin_data_path", "cache_dir", "binary_path"]
+        )
         self.datasets: dict[str, StreamingDataset] = {}
         self.data_loaders: dict[str, StreamingDataLoader] = {}
-        if self.subsample_index:
-            self._get_subsample_sizes()
-            self._set_split_paths(True)
-            if not all(path.exists() for path in self.split_paths):
-                # if any path doesn't exist generate subsample sets first
-                self.write_subsamples(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
-        else:
-            self._set_split_paths(False)
-        # add `force_overwrite` key to the ignored fields when writing YAML
+        self.access_internet: bool = True
+
+    @property
+    def tokenizer_root_path(self) -> Path:
+        """Root folder where to store all the downloaded tokenizers.
+        """
+        return self.root_data_path / "tokenizers"
+
+    @property
+    def bin_data_path(self) -> Path:
+        """Root folder where to store all the tokenized datasets.
+        """
+        return self.root_data_path / "binaries"
+
+    @property
+    def cache_dir(self) -> Path:
+        """Cache directory for huggingface datasets.
+        """
+        return self.root_data_path / "cache"
+
+    @property
+    def binary_path(self) -> Path:
+        """Main/parent dataset path.
+        """
+        return self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
 
     def _set_split_paths(self, subsample_mode: bool) -> None:
         if subsample_mode:
@@ -127,7 +149,14 @@ class DataHandler(BaseConfig):
     def _get_subsample_sizes(self) -> None:
         # masquerade as the parent dataset here
         self._set_split_paths(False)
-        self.load_datasets(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        # Load datasets
+        self.__convert_to_binary()
+
+        for i, split in enumerate(self.splits):
+            self.datasets[split] = self.get_dataset(
+                binary_path=self.split_paths[i], nlp_dataset=self.nlp_dataset, block_size=self.block_size
+            )
+        # Load end
         dataset = self.datasets[self.splits[0]]
         n_tokens = len(dataset) * dataset[0].shape[0]
         sample_sizes: list[int] = []
@@ -139,12 +168,15 @@ class DataHandler(BaseConfig):
             ]
         self.subsample_sizes: list[int] = [int(n_tokens // 1e6)] + sample_sizes
 
-    def __convert_to_binary(self) -> None:
-        if (
+    def __check_exists(self) -> bool:
+        return (
             not self.force_overwrite
             and all(path.exists() for path in self.split_paths)
             and self.to_dict() == self.load_yaml(self.binary_path)
-        ):
+        )
+
+    def __convert_to_binary(self) -> None:
+        if self.__check_exists():
             # Return if all folders for splits exists and serialized version of the config matches the yaml file
             warnings.warn(
                 f"Dataset {self.hf_dataset_id} already exists at {self.binary_path}.\n"
@@ -152,6 +184,13 @@ class DataHandler(BaseConfig):
                 f"If you would like to prepare the dataset again set the `force_overwrite` flag."
             )
             return
+        # Check if internet available
+        if not self.access_internet:
+            raise ValueError(
+                f"Dataset can not be downloaded when the acccess_internet is {self.access_internet}, "
+                f"please download the dataset to '{self.binary_path}' first,"
+                f" with self.access_internet set to True"
+            )
 
         dataset_splits = self.__get_data_splits()
 
@@ -244,7 +283,14 @@ class DataHandler(BaseConfig):
 
     def write_subsamples(self, nlp_dataset: bool = True, block_size: int = 2048) -> None:
         self._set_split_paths(False)
-        self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
+        # Load datasets
+        self.__convert_to_binary()
+
+        for i, split in enumerate(self.splits):
+            self.datasets[split] = self.get_dataset(
+                binary_path=self.split_paths[i], nlp_dataset=nlp_dataset, block_size=block_size
+            )
+        # Load end
         self._set_split_paths(True)
         dataset = self.datasets[self.splits[0]]
 
@@ -308,7 +354,15 @@ class DataHandler(BaseConfig):
 
         """
         # TODO: write a helper function to combine multiple datasets with `CombinedStreamingDataset` if necessary
-        self.__convert_to_binary()
+        if self.subsample_index:
+            self._get_subsample_sizes()
+            self._set_split_paths(True)
+            if not self.__check_exists():
+                # if any path doesn't exist generate subsample sets first
+                self.write_subsamples(nlp_dataset=self.nlp_dataset, block_size=self.block_size)
+        else:
+            self._set_split_paths(False)
+            self.__convert_to_binary()
 
         for i, split in enumerate(self.splits):
             self.datasets[split] = self.get_dataset(
@@ -316,7 +370,12 @@ class DataHandler(BaseConfig):
             )
 
     def load_data_loaders(
-        self, nlp_dataset: bool = True, batch_size: int = 64, block_size: int = 2048, num_workers: int = 1
+        self,
+        nlp_dataset: bool = True,
+        batch_size: int = 64,
+        block_size: int = 2048,
+        num_workers: int = 1,
+        access_internet: bool = True,
     ) -> None:
         """Loads the `StreamingDataLoaders` into `self.data_loaders` dict, keys are `splits`
 
@@ -325,8 +384,10 @@ class DataHandler(BaseConfig):
             batch_size: Batch size for `StreamingDataLoader` (same for all splits)
             block_size: Block size in each batch.
             num_workers: Number of workers for `StreamingDataLoader`
+            access_internet: Enable data downloading
 
         """
+        self.access_internet = access_internet
         self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
             self.data_loaders[split] = StreamingDataLoader(
@@ -340,15 +401,14 @@ if __name__ == "__main__":
         hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
-        force_overwrite=True,
+        force_overwrite=False,
         force_splits=True,
-        subsample_index=1,
+        subsample_index=0,
     )
     # data_handler = DataHandler.from_path(Path("/data/binaries/wikitext/wikitext-2-v1"))
     # data_handler.write_subsamples()
     # TODO: improve subsampling interface
-    # TODO: Refactor the post_init and DataHandler
-    data_handler.load_data_loaders()
+    data_handler.load_data_loaders(access_internet=True)
     s = 0
     print(len(data_handler.data_loaders["train"]))
     for batch in data_handler.data_loaders["train"]:
