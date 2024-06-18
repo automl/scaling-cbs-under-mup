@@ -15,14 +15,16 @@ source activate.sh my_scaling ../envs/
 ### Supporting repos
 
 `NePS`:
-```
+```bash
+# from base directory
 pip install https://github.com/automl/neps.git
 cd neps/
 pip install -e .
 ```
 
 `Lightning-GPT`:
-```
+```bash
+# from base directory
 pip install https://github.com/Lightning-AI/litgpt.git
 cd litgpt/
 pip install -e .
@@ -32,12 +34,13 @@ pip install -e .
 
 Setup [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer):
 ```bash
+# installs locally to system and not to an environment
 curl -sSL https://install.python-poetry.org | python3.10 -
 ```
 
 Install this repo from the base directory:
 
-```
+```bash
 poetry install
 ```
 
