@@ -19,72 +19,81 @@ from scales.config.utils import download_tokenizer, preprocess_wikitext, simple_
 
 @dataclass
 class DataHandler(BaseConfig):
-    """This class defines a dataset and how it was processed, tokenized, split, optimized and saved. When downloading,
-    this class will create an YAML file in the target folder. Later when the Dataset is requested again if the
-    arguments of this class matches the saved configuration in the YAML file the dataset will be loaded, otherwise,
+    """DataHandler class for handling the dataset downloading, processing, and loading.
+    
+    This class defines a dataset and how it was processed, tokenized, split, optimized and saved. 
+    When downloading, this class will create an YAML file in the target folder. 
+    Later when the Dataset is requested again if the arguments of this class matches 
+    the saved configuration in the YAML file the dataset will be loaded, otherwise, 
     it'll download the dataset again.
 
     WARNING: All fields not passed to the `self.ignore_fields` will be checked
 
     """
-
+    # Dataset identifier for the HuggingFace Datasets
     hf_dataset_id: str
-    """Dataset identifier for the HuggingFace Datasets."""
+    
+    # Dataset Subset name for the datasets with multiple subsets
     hf_data_subset_name: str
-    """Dataset Subset name for the datasets with multiple subsets."""
+    
+    # Preprocess Dataset before passing into tokenization, used in `Dataset.map(...)` function
     preprocess_fn: Callable[[dict], dict]
-    """Preprocess Dataset before passing into tokenization.
-
-    To be used in `Dataset.map(...)` function
-
-    """
+    
+    # HuggingFace repository ID for the model which we will use the tokenizer of
     tokenizer_repo_id: str
-    """HuggingFace repository ID for the model which we will use the tokenizer of."""
+    
+    # HuggingFace dataset data_files
     hf_data_files: str | None = None
-    """HuggingFace dataset data_files."""
+    
+    # Filter function to be called on each dataset object immediately after loading
     filter_function: Callable[[dict], bool] = simple_filter
-    """Filter function to be called on each dataset object immediately after loading."""
+
+    # Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`
+    #   Takes in at least a single argument, which is the index (or list of indices) of the dataset
+    #   and returns a tensor for the corresponding text.
     tokenizer_fn: Callable = tokenize_wikitext
-    """Tokenizer function to be used for the `optimize` function of `litdata.processing.functions`.
-
-    Takes in at least a single argument, which is the index (or list of indices) of the dataset and returns a tensor for
-    the corresponding text.
-
-    """
+    
+    # Root folder which holds tokenizers, binaries, cache folders
     root_data_path: Path = Path(__file__).parent.parent.parent / "data"
-    """Root folder which holds tokenizers, binaries, cache folders."""
+
+    # Data splits to create or load from hf hub
+    #  If any split other than the 'train' split doesn't exist,
+    #  the loader will try to load all the splits and split them according to the `default_split_ratio`.
+    #  If 'train' split is specified but not found then an exception will occur.
     splits: list[str] = field(default_factory=lambda: ["train", "validation", "test"])
-    """Data splits to create or load from hf hub.
 
-    If any split other than the 'train' split doesn't exist,
-    the loader will try to load all the splits and split them according to the `default_split_ratio`.
-    If 'train' split is specified but not found then an exception will occur
-
-    """
+    # Split ratios for data splits when either a split specified is not found on the hub
+    # or `force_splits` flag is set
     default_split_ratio: list[float] = field(default_factory=lambda: [0.8, 0.1, 0.1])
-    """Split ratios for data splits when either a split specified is not found on the hub or `force_splits` flag is
-    set."""
+    
+    # Forces the loader to load all the splits existing on the hub for the dataset and 
+    # split them according to the `default_split_ratio`
     force_splits: bool = False
-    """Forces the loader to load all the splits existing on the hub for the dataset and split them according to the
-    `default_split_ratio`"""
+    
+    # Forces to process the dataset again if set
     force_overwrite: bool = False
-    """Forces to process the dataset again if set."""
+
+    # `tokenizer_fn` can take multiple arguments if their defaults are specified here
     tokenizer_fn_kwargs: dict[Any, Any] = field(default_factory=dict)
-    """`tokenizer_fn` can take multiple arguments if their defaults are specified here."""
+    
+    # Seed for splitting datasets and shuffling
     seed: int = 42
-    """Seed for splitting datasets and shuffling."""
+
+    # Size of the already subsampled set
+    #   e.g: 4M, 47M, used only for loading not for writing
+    #   Note: valid `subsample_size`s are generated only after the 
+    #   first time `self.write_subsamples` is called
     # subsample_size: str | None = None
-    """Size of the already subsampled set e.g: 4M, 47M, used only for loading not for writing
-    Note: valid `subsample_size`s are generated only after the first time `self.write_subsamples` is called
-    """
+    
+    # Valid subsample size indices are: `0`, `1`, `2`
+    #   `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
     subsample_index: int = 0
-    """Valid subsample size indices are: `0`, `1`, `2`.
-    `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
-    """
+    
+    # Optimize the data loading for nlp datasets (Will be removed in the next iteration)
     nlp_dataset: bool = True
-    """Optimize the data loading for nlp datasets (Will be removed in the next iteration)"""
+
+    # Block size for data loading (Will be removed in the next iteration)
     block_size: int = 2048
-    """Block size for data loading (Will be removed in the next iteration)"""
 
     # TODO: organize filter calls to be consistent
 
@@ -104,22 +113,26 @@ class DataHandler(BaseConfig):
 
     @property
     def tokenizer_root_path(self) -> Path:
-        """Root folder where to store all the downloaded tokenizers."""
+        """Root folder where to store all the downloaded tokenizers.
+        """
         return self.root_data_path / "tokenizers"
 
     @property
     def bin_data_path(self) -> Path:
-        """Root folder where to store all the tokenized datasets."""
+        """Root folder where to store all the tokenized datasets.
+        """
         return self.root_data_path / "binaries"
 
     @property
     def cache_dir(self) -> Path:
-        """Cache directory for huggingface datasets."""
+        """Cache directory for huggingface datasets.
+        """
         return self.root_data_path / "cache"
 
     @property
     def binary_path(self) -> Path:
-        """Main/parent dataset path."""
+        """Main/parent dataset path.
+        """
         return self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
 
     def _set_split_paths(self, subsample_mode: bool) -> None:
