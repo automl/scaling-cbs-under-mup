@@ -57,9 +57,10 @@ class BaseConfig(Generic[T]):
                     dict_[key] = asdict(value)
         return dict_
 
-    def write_yaml(self, output_dir: Path, ignore_defaults: bool = True) -> None:
+    def write_yaml(self, output_dir: Path, ignore_defaults: bool = True, name: str = None) -> None:
         config = self.to_dict(ignore_defaults=ignore_defaults)
-        yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{type(self).__name__}.yaml"
+        _name = name if name is not None else type(self).__name__
+        yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{_name}.yaml"
         print(f"Saving Configration at {str(yaml_path)}")
         with yaml_path.open("w", encoding="utf-8") as yaml_file:
             yaml.dump(config, yaml_file, Dumper=self.yaml_dumper())
@@ -84,6 +85,8 @@ class BaseConfig(Generic[T]):
 
     @classmethod
     def load_yaml(cls, output_dir: Path) -> dict[str, Any]:
+        if isinstance(output_dir, str):
+            output_dir = Path(output_dir)
         yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{cls.__name__}.yaml"
         if yaml_path.exists():
             with yaml_path.open(encoding="utf-8") as yaml_file:
