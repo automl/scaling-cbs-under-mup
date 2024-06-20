@@ -25,6 +25,7 @@ from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
 
 # from scales.lr_utils import LRScheduler
+from scales.args import LoggingArgs
 from scales.utils import load_checkpoint, save_checkpoint
 
 
@@ -38,6 +39,10 @@ def main(
     fabric.launch()
     fabric.seed_everything(train_args.seed)
     out_dir = init_out_dir(out_dir)
+
+    # Initialize state
+    states = init_state(fabric=fabric, train_args=train_args)
+
     logging = train_args.logging_args
 
     if logging.log_dir is None:
@@ -52,8 +57,6 @@ def main(
 
     effective_batch_size = device_count * train_args.accumulation_iters * train_args.micro_batch_size
     fabric.print(f"Effective batch size for this setup is {effective_batch_size}")
-
-    states = init_state(fabric=fabric, train_args=train_args)
 
     micro_batch_size = train_args.micro_batch_size
     block_size = train_args.block_size
@@ -100,6 +103,12 @@ def init_state(
     train_args: TrainConfig,
     load_model_from_path: str | Path | None = None,
 ) -> dict:
+    train_args.logging_args = LoggingArgs(
+        tracked_metrics=train_args.tracked_metrics,
+        log_step=train_args.log_step,
+        log_dir=train_args.log_dir
+    )
+
     if load_model_from_path is None:
         states: Dict[str, Any] = {}
         model = GPT(train_args.model_config)

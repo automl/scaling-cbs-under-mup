@@ -241,9 +241,6 @@ class TrainConfig(BaseConfig):
         )
 
         self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics
-        self.logging_args = LoggingArgs(
-            tracked_metrics=self.tracked_metrics, log_step=self.log_step, log_dir=self.log_dir
-        )
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:

@@ -5,6 +5,7 @@ from typing import Union
 
 import lightning as L
 
+from scales.args import LoggingArgs
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.train_config import TrainConfig
 from scales.refactored_pretrain import main
@@ -52,6 +53,7 @@ if __name__ == "__main__":
     # Loading the training configuration
     assert Path(args.train_config_path).exists(), f"Configuration file {args.train_config_path} does not exist!"
     train_config = TrainConfig.from_path(args.train_config_path)
+    train_config.log_dir = Path(args.output_dir) / "logs"
 
     # Load the data configuration
     assert Path(args.data_config_path).exists(), f"Configuration file {args.data_config_path} does not exist!"
