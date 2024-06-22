@@ -12,7 +12,7 @@ import torch.nn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.utils import total_gradient_norm
+from scales.utils import total_gradient_l2_norm, gradient_l2_norm_per_layer
 
 
 def should_log(func: Callable) -> Callable:
@@ -43,8 +43,8 @@ class LoggingArgs:
     the metric will be logged each `log_step` steps. To skip the `log_step` check, pass in extra arg: last=True
     """
 
-    log_step: int = 5
-    tracked_metrics: list[str] = field(default_factory=list)
+    global_log_step: int = 1
+    tracked_metrics: dict[str, int] = field(default_factory=dict)
     log_dir: str | Path | None = None
 
     def __post_init__(self) -> None:
@@ -56,6 +56,10 @@ class LoggingArgs:
             _ = [self.get_metric(metric) for metric in self.tracked_metrics]
         else:
             self.writer = None
+        # resolve logging frequency
+        for k, v in self.tracked_metrics.items():
+            if v == 0 or v is None:
+                self.tracked_metrics[k] = self.global_log_step
 
     def update_logdir(self, log_dir: str | Path | None) -> None:
         self.log_dir = log_dir
@@ -64,7 +68,9 @@ class LoggingArgs:
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
         if last:
             return func.__name__ in self.tracked_metrics
-        return step % self.log_step == 0 and func.__name__ in self.tracked_metrics
+        # sets the boolean flag if the metric is in the tracked metrics or to global log step
+        _step = self.tracked_metrics.get(func.__name__ , self.global_log_step)
+        return step % _step == 0 and func.__name__ in self.tracked_metrics
 
     def get_metric(self, metric: str) -> Any:
         try:
@@ -89,8 +95,20 @@ class LoggingArgs:
 
     @should_log
     def total_gradient_norm(self, model: torch.nn.Module, step: int) -> None:
-        total_norm = total_gradient_norm(model)
+        total_norm = total_gradient_l2_norm(model)
         self.writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=step)
+
+    @should_log
+    def gradient_norm_per_layer(self, model: torch.nn.module, step: int) -> None:
+        layer_grad_norms = gradient_l2_norm_per_layer(model, step)
+
+        # log to TensorBoard as separate plots
+        for layer, norm in layer_grad_norms.items():
+            self.writer.add_scalar(
+                tag=f'Per-layer Gradient Norm/layer{layer}',
+                scalar_value=norm,
+                global_step=step
+            )
 
     @should_log
     def train_loss(self, loss: float, step: int) -> None:

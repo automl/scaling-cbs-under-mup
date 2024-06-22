@@ -1,3 +1,4 @@
+from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import random
@@ -7,6 +8,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 from litgpt.utils import save_config
+from torch.utils.tensorboard import SummaryWriter
 
 from scales.lr_utils import LRScheduler
 
@@ -79,12 +81,22 @@ def save_checkpoint_state(
     )
 
 
-
-def total_gradient_norm(model: nn.Module) -> float:
+def total_gradient_l2_norm(model: nn.Module) -> float:
     total_norm = 0
     parameters = [p for p in model.parameters() if p.grad is not None and p.requires_grad]
     for p in parameters:
         param_norm = p.grad.detach().data.norm(2)
         total_norm += param_norm.item() ** 2
-    return total_norm**0.5
+    return total_norm ** 0.5
 
+
+def gradient_l2_norm_per_layer(model: nn.Module, global_step: int) -> None:
+    layer_grad_norms = defaultdict(list)
+    for name, param in model.named_parameters():
+        if 'transformer.h' in name and param.grad is not None and param.requires_grad:
+            layer_id = name.split(".transformer.h.")[-1].split(".")[0]  # extract the layer ID
+            layer_grad_norms[layer_id].append(param.norm(2).item() ** 2)
+    # calculating norm for each layer by summing the square of each parameter's gradient
+    layer_grad_norms = {k: np.sum(v) ** 0.5 for k, v in layer_grad_norms.items()}
+
+    return layer_grad_norms

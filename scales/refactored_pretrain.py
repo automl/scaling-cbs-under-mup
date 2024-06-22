@@ -45,10 +45,10 @@ def main(
     # Initialize state
     states = init_state(fabric=fabric, train_args=train_args, out_dir=out_dir)
 
-    logging = train_args.logging_args
+    logger = train_args.logging_args
 
-    if logging.log_dir is None:
-        logging.update_logdir(out_dir / "logs")
+    if logger.log_dir is None:
+        logger.update_logdir(out_dir / "logs")
 
     device_count = parse_devices(devices=train_args.devices)
 
@@ -104,6 +104,7 @@ def init_state(
     fabric: L.Fabric,
     train_args: TrainConfig,
     out_dir: Path,
+    save_init_state: bool = True,
     load_model_from_path: str | Path | None = None,
 ) -> dict:
     """ Initialize the state for training.
@@ -113,6 +114,7 @@ def init_state(
         train_args: The training configuration
         out_dir: The output directory where the logs and checkpoints will be saved
             If `save_state_path` is not provided, the state checkpoints will be saved here
+        save_init_state: Whether to save the initial state, especially the initialization weights
         load_model_from_path: The path to load the model from (TODO: write what is different here)
     
     Returns:
@@ -120,7 +122,7 @@ def init_state(
     """
     train_args.logging_args = LoggingArgs(
         tracked_metrics=train_args.tracked_metrics,
-        log_step=train_args.log_step,
+        global_log_step=train_args.global_log_step,
         log_dir=train_args.log_dir
     )
 
@@ -164,6 +166,19 @@ def init_state(
         states["train_steps"] = 0
         states["train_tokens"] = 0
 
+    if train_args.save_state_path is None:
+        train_args.save_state_path = out_dir
+
+    if save_init_state:
+        save_checkpoint_state(
+            save_state_path=Path(train_args.save_state_path),
+            train_steps=states["train_steps"],
+            model=model,
+            optimizer=optimizer,
+            scheduler=torch_scheduler,
+            overwrite_checkpoint=False  # adds a step to the checkpoint name, 0 in this case
+        )
+
     # load checkpoint state
     train_steps = 0
     if train_args.load_state_path is not None:
@@ -175,8 +190,6 @@ def init_state(
             scheduler=torch_scheduler,
             overwrite_checkpoint=train_args.overwrite_state
         )
-    if train_args.save_state_path is None:
-        train_args.save_state_path = out_dir
 
     states["train_steps"] = train_steps
     states["model"] = model
@@ -196,7 +209,7 @@ def train(
     val_dataloader: DataLoader,
 ) -> torch.Tensor:
     max_seq_length = train_args.block_size
-    logging = train_args.logging_args
+    logger = train_args.logging_args
     tokens_per_step = train_args.block_size * effective_batch_size
     accumulation_iters = train_args.accumulation_iters
 
@@ -234,7 +247,7 @@ def train(
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
-            logging.output_logits_mean(
+            logger.output_logits_mean(
                 logits=logits,
                 step=states["train_steps"],
                 fabric=fabric,
@@ -259,11 +272,12 @@ def train(
                     max_norm=train_args.clip_max_norm,
                     clip_val=train_args.clip_max_val,
                 )
-            logging.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
             states["lr_scheduler"].step(
                 steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
             )
-            logging.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
+            logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
             states["optimizer"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
@@ -277,7 +291,7 @@ def train(
             avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
-            logging.train_loss(loss=loss, step=states["train_steps"], last=last_step)
+            logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
                 f" - Current Throughput {current_throughput} - Avg Throughput {avg_throughput}"
@@ -301,7 +315,7 @@ def train(
                 max_seq_length,
                 train_args.max_val_steps,
             )
-            logging.validation_loss(val_loss, step=states["train_steps"], last=last_step)
+            logger.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
 
         # checkpoint saving
@@ -322,7 +336,7 @@ def train(
         if last_step is True:
             break
     # end of training loop
-    logging.close()
+    logger.close()
 
     return val_loss.detach().cpu()
 

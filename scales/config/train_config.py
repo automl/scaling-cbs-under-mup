@@ -204,7 +204,8 @@ class TrainConfig(BaseConfig):
 
     # logging details
     tracked_metrics: list[str] | None = None
-    log_step: int = 5
+    global_log_step: int = 5
+    log_steps: list[int] | None = None
     log_dir: str | Path | None = None
 
     # seeding
