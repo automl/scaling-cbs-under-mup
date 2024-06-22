@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import wraps
+import numpy as np
 from pathlib import Path
 from typing import Any, Callable
 from warnings import warn
@@ -46,6 +47,7 @@ class LoggingArgs:
     global_log_step: int = 1
     tracked_metrics: dict[str, int] = field(default_factory=dict)
     log_dir: str | Path | None = None
+    suppress_all_logs: bool = False
 
     def __post_init__(self) -> None:
         """Function to be called after log_dir change."""
@@ -60,6 +62,10 @@ class LoggingArgs:
         for k, v in self.tracked_metrics.items():
             if v == 0 or v is None:
                 self.tracked_metrics[k] = self.global_log_step
+        if self.suppress_all_logs:
+            # sets the logging frequency to infinity to prevent any logging
+            self.global_log_step = np.inf
+            self.tracked_metrics = {k: np.inf for k in self.tracked_metrics}
 
     def update_logdir(self, log_dir: str | Path | None) -> None:
         self.log_dir = log_dir
