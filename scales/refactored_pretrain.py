@@ -26,7 +26,9 @@ from scales.config.train_config import TrainConfig
 
 # from scales.lr_utils import LRScheduler
 from scales.args import LoggingArgs
-from scales.utils import load_checkpoint, save_checkpoint
+from scales.utils import (
+    load_checkpoint, save_checkpoint, load_checkpoint_state, save_checkpoint_state
+)
 
 
 def main(
@@ -41,7 +43,7 @@ def main(
     out_dir = init_out_dir(out_dir)
 
     # Initialize state
-    states = init_state(fabric=fabric, train_args=train_args)
+    states = init_state(fabric=fabric, train_args=train_args, out_dir=out_dir)
 
     logging = train_args.logging_args
 
@@ -101,8 +103,21 @@ def main(
 def init_state(
     fabric: L.Fabric,
     train_args: TrainConfig,
+    out_dir: Path,
     load_model_from_path: str | Path | None = None,
 ) -> dict:
+    """ Initialize the state for training.
+
+    Args:
+        fabric: The fabric object
+        train_args: The training configuration
+        out_dir: The output directory where the logs and checkpoints will be saved
+            If `save_state_path` is not provided, the state checkpoints will be saved here
+        load_model_from_path: The path to load the model from (TODO: write what is different here)
+    
+    Returns:
+        dict: The state for training
+    """
     train_args.logging_args = LoggingArgs(
         tracked_metrics=train_args.tracked_metrics,
         log_step=train_args.log_step,
@@ -149,6 +164,21 @@ def init_state(
         states["train_steps"] = 0
         states["train_tokens"] = 0
 
+    # load checkpoint state
+    train_steps = 0
+    if train_args.load_state_path is not None:
+        # load the state here
+        train_steps, model, optimizer = load_checkpoint_state(
+            load_state_path=Path(train_args.load_state_path),
+            model=model,
+            optimizer=optimizer,
+            scheduler=torch_scheduler,
+            overwrite_checkpoint=train_args.overwrite_state
+        )
+    if train_args.save_state_path is None:
+        train_args.save_state_path = out_dir
+
+    states["train_steps"] = train_steps
     states["model"] = model
     states["optimizer"] = optimizer
     states["lr_scheduler"] = train_args.lr_scheduler
@@ -181,6 +211,12 @@ def train(
     # wait for all processes
     fabric.barrier()
 
+    # accounting for steps gone in the previous training
+    for i, _batch in enumerate(train_iterator):
+        if i == states["train_steps"]:
+            break
+    
+    # main training loop
     for batch in train_iterator:
         if states["train_steps"] + 1 == train_args.train_steps:
             last_step = True
@@ -252,8 +288,11 @@ def train(
         else:
             loop_iters += 1
 
+        # validation loop
         if (
-            states["train_steps"] % train_args.validate_every == 0 or states["train_steps"] == 1 or last_step is True
+            states["train_steps"] % train_args.validate_every == 0 \
+            or states["train_steps"] == 1 or \
+            last_step is True
         ) and not is_accumulating:
             val_loss = validate(
                 fabric,
@@ -265,9 +304,24 @@ def train(
             logging.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
 
+        # checkpoint saving
+        if (
+            states["train_steps"] % train_args.save_state_every == 0 or \
+            states["train_steps"] == 1 or \
+            last_step is True
+        ) and not is_accumulating:
+            save_checkpoint_state(
+                save_state_path=Path(train_args.save_state_path),
+                train_steps=states["train_steps"],
+                model=states["model"],
+                optimizer=states["optimizer"],
+                scheduler=states["torch_scheduler"],
+                overwrite_checkpoint=train_args.overwrite_state
+            )
+
         if last_step is True:
             break
-
+    # end of training loop
     logging.close()
 
     return val_loss.detach().cpu()

@@ -200,15 +200,32 @@ class TrainConfig(BaseConfig):
     clip_max_norm: int | None = None
     clip_max_val: float | None = None
     validate_every: int = 5
+    """Number of steps after which to validate the model."""
 
+    # logging details
     tracked_metrics: list[str] | None = None
     log_step: int = 5
     log_dir: str | Path | None = None
 
+    # seeding
     seed: int = 444
+
+    # checkpoint management
+    load_state_path: Path | None = None
+    """Path to load checkpoint, random states, etc. for continued training."""
+    save_state_path: Path | None = None
+    """Path to save checkpoint, random states, etc. for continued training."""
+    save_state_every: int | None = None
+    """Number of steps to save the state. If None, same as `validate every`"""
+    overwrite_state: bool = True
+    """If True, overwrite the state, using the same filename. If False, append step to filename."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        self.save_state_every = (
+           self.validate_every if self.save_state_every is None else self.save_state_every
+        )
+
         self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
         self.model_config = resolve_model_config(
             self.model_config, self.model_checkpoint_dir, self.model_config_path, self.model_name
