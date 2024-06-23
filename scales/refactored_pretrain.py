@@ -13,6 +13,7 @@ import time
 import warnings
 from pathlib import Path
 from typing import Any, Dict
+import yaml
 
 import lightning as L
 import torch
@@ -74,6 +75,14 @@ def main(
     train_dataloader, val_dataloader = fabric.setup_dataloaders(train_dataloader, val_dataloader)
     fabric.print(f"Steps for training an epoch per device: {len(train_dataloader)}")
     fabric.print(f"Steps for validation per device: {len(val_dataloader)}")
+
+    _info = dict(
+        parameters=train_args.trainable_params,
+        effective_batch_size=effective_batch_size,
+        devices=device_count
+    )
+    with open(out_dir / "info.yaml", "w") as f:
+        yaml.dump(_info, f)
 
     train_time = time.time()
 

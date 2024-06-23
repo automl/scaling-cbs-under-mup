@@ -21,6 +21,8 @@ class ConfigWrapper(BaseConfig):
     n_layer: int
     block_size: int = 1024
     vocab_size: int = 50257
+    bias: bool = True
+    lm_head_bias: bool = False
     _initialized: bool = False
 
     def __post_init__(self) -> None:
