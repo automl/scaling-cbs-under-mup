@@ -77,6 +77,12 @@ def main(
         "parameters": train_args.trainable_params,
         "effective_batch_size": effective_batch_size,
         "devices": device_count,
+        "scales": {
+            "d_model": train_args.model_config.d_model,
+            "n_head": train_args.model_config.n_head,
+            "n_layer": train_args.model_config.n_layer,
+            "block_size": train_args.block_size,
+        }
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
