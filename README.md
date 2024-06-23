@@ -43,6 +43,12 @@ Install this repo from the base directory:
 poetry install
 ```
 
+## Use pre-commit maximally
+
+```bash
+pre-commit run --all-files
+```
+
 ---
 ---
 ---

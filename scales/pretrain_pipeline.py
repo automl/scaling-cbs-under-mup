@@ -42,8 +42,7 @@ def main(
     model_config_file: str | Path | None = None,
     seed: int = 1337,
 ) -> dict:
-    """Main function to train a language model.
-    """
+    """Main function to train a language model."""
     fabric.launch()
     fabric.seed_everything(seed)
 
@@ -101,8 +100,9 @@ def main(
 
     if force_unique_tokens:
         seen_tokens = states.get("train_tokens", 0)
-        if (max_train_steps and max_train_steps * tokens_per_step > (max_data_tokens - seen_tokens)) or \
-            (max_train_tokens and max_train_tokens > (max_data_tokens - seen_tokens)):
+        if (max_train_steps and max_train_steps * tokens_per_step > (max_data_tokens - seen_tokens)) or (
+            max_train_tokens and max_train_tokens > (max_data_tokens - seen_tokens)
+        ):
             raise ValueError(f"Training on Unique tokens can't be guaranteed available tokens: {max_data_tokens}")
 
     start_time = time.time()
@@ -180,7 +180,7 @@ def init_state(
         model.parameters(),
         lr=lr_scheduler.init_lr,
         weight_decay=hparams["weight_decay"],
-        betas=(0.9, 0.95)  # TODO: expose hyperparameters
+        betas=(0.9, 0.95),  # TODO: expose hyperparameters
     )
 
     if lr_scheduler.torch_scheduler is not None:

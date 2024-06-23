@@ -30,6 +30,7 @@ class DataHandler(BaseConfig):
     WARNING: All fields not passed to the `self.ignore_fields` will be checked
 
     """
+
     # Dataset identifier for the HuggingFace Datasets
     hf_dataset_id: str
 
@@ -113,26 +114,22 @@ class DataHandler(BaseConfig):
 
     @property
     def tokenizer_root_path(self) -> Path:
-        """Root folder where to store all the downloaded tokenizers.
-        """
+        """Root folder where to store all the downloaded tokenizers."""
         return self.root_data_path / "tokenizers"
 
     @property
     def bin_data_path(self) -> Path:
-        """Root folder where to store all the tokenized datasets.
-        """
+        """Root folder where to store all the tokenized datasets."""
         return self.root_data_path / "binaries"
 
     @property
     def cache_dir(self) -> Path:
-        """Cache directory for huggingface datasets.
-        """
+        """Cache directory for huggingface datasets."""
         return self.root_data_path / "cache"
 
     @property
     def binary_path(self) -> Path:
-        """Main/parent dataset path.
-        """
+        """Main/parent dataset path."""
         return self.bin_data_path / self.hf_dataset_id / self.hf_data_subset_name
 
     def _set_split_paths(self, subsample_mode: bool) -> None:

@@ -9,7 +9,6 @@ from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters, parse_devices
 
-from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
@@ -214,19 +213,33 @@ class TrainConfig(BaseConfig):
 
     # checkpoint management
     load_state_path: Path | None = None
-    """Path to load checkpoint, random states, etc. for continued training."""
+    """Path to load checkpoint, random states, etc.
+
+    for continued training.
+
+    """
     save_state_path: Path | None = None
-    """Path to save checkpoint, random states, etc. for continued training."""
+    """Path to save checkpoint, random states, etc.
+
+    for continued training.
+
+    """
     save_state_every: int | None = None
-    """Number of steps to save the state. If None, same as `validate every`"""
+    """Number of steps to save the state.
+
+    If None, same as `validate every`
+
+    """
     overwrite_state: bool = True
-    """If True, overwrite the state, using the same filename. If False, append step to filename."""
+    """If True, overwrite the state, using the same filename.
+
+    If False, append step to filename.
+
+    """
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        self.save_state_every = (
-           self.validate_every if self.save_state_every is None else self.save_state_every
-        )
+        self.save_state_every = self.validate_every if self.save_state_every is None else self.save_state_every
 
         self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
         self.model_config = resolve_model_config(

@@ -13,23 +13,20 @@ import time
 import warnings
 from pathlib import Path
 from typing import Any, Dict
-import yaml
 
 import lightning as L
 import torch
 import torch.nn as nn
+import yaml
 from litgpt.model import GPT, Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
 from torch.utils.data import DataLoader
 
-from scales.config.data_config import DataHandler
-from scales.config.train_config import TrainConfig
-
 # from scales.lr_utils import LRScheduler
 from scales.args import LoggingArgs
-from scales.utils import (
-    load_checkpoint, save_checkpoint, load_checkpoint_state, save_checkpoint_state
-)
+from scales.config.data_config import DataHandler
+from scales.config.train_config import TrainConfig
+from scales.utils import load_checkpoint, load_checkpoint_state, save_checkpoint, save_checkpoint_state
 
 
 def main(
@@ -76,11 +73,11 @@ def main(
     fabric.print(f"Steps for training an epoch per device: {len(train_dataloader)}")
     fabric.print(f"Steps for validation per device: {len(val_dataloader)}")
 
-    _info = dict(
-        parameters=train_args.trainable_params,
-        effective_batch_size=effective_batch_size,
-        devices=device_count
-    )
+    _info = {
+        "parameters": train_args.trainable_params,
+        "effective_batch_size": effective_batch_size,
+        "devices": device_count,
+    }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
 
@@ -116,7 +113,7 @@ def init_state(
     save_init_state: bool = True,
     load_model_from_path: str | Path | None = None,
 ) -> dict:
-    """ Initialize the state for training.
+    """Initialize the state for training.
 
     Args:
         fabric: The fabric object
@@ -128,11 +125,12 @@ def init_state(
 
     Returns:
         dict: The state for training
+
     """
     train_args.logging_args = LoggingArgs(
         tracked_metrics=train_args.tracked_metrics,
         global_log_step=train_args.global_log_step,
-        log_dir=train_args.log_dir
+        log_dir=train_args.log_dir,
     )
 
     if load_model_from_path is None:
@@ -185,7 +183,7 @@ def init_state(
             model=model,
             optimizer=optimizer,
             scheduler=torch_scheduler,
-            overwrite_checkpoint=False  # adds a step to the checkpoint name, 0 in this case
+            overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
         )
 
     # load checkpoint state
@@ -197,7 +195,7 @@ def init_state(
             model=model,
             optimizer=optimizer,
             scheduler=torch_scheduler,
-            overwrite_checkpoint=train_args.overwrite_state
+            overwrite_checkpoint=train_args.overwrite_state,
         )
 
     states["train_steps"] = train_steps
@@ -321,9 +319,7 @@ def train(
 
         # validation loop
         if (
-            states["train_steps"] % train_args.validate_every == 0 \
-            or states["train_steps"] == 1 or \
-            last_step is True
+            states["train_steps"] % train_args.validate_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
             val_loss = validate(
                 fabric,
@@ -337,9 +333,7 @@ def train(
 
         # checkpoint saving
         if (
-            states["train_steps"] % train_args.save_state_every == 0 or \
-            states["train_steps"] == 1 or \
-            last_step is True
+            states["train_steps"] % train_args.save_state_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
             save_checkpoint_state(
                 save_state_path=Path(train_args.save_state_path),
@@ -347,7 +341,7 @@ def train(
                 model=states["model"],
                 optimizer=states["optimizer"],
                 scheduler=states["torch_scheduler"],
-                overwrite_checkpoint=train_args.overwrite_state
+                overwrite_checkpoint=train_args.overwrite_state,
             )
 
         if last_step is True:

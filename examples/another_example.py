@@ -8,7 +8,6 @@ from scales.config.train_config import PipelineConfig, TrainConfig
 from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
 
-
 if __name__ == "__main__":
     output_dir = Path(__file__).parent / "output"
 

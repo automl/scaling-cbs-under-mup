@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import wraps
-import numpy as np
 from pathlib import Path
 from typing import Any, Callable
 from warnings import warn
 
 import lightning as L
+import numpy as np
 import torch
 import torch.nn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.utils import total_gradient_l2_norm, gradient_l2_norm_per_layer
+from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm
 
 
 def should_log(func: Callable) -> Callable:
@@ -76,7 +76,7 @@ class LoggingArgs:
         if last:
             return func.__name__ in self.tracked_metrics
         # sets the boolean flag if the metric is in the tracked metrics or to global log step
-        _step = self.tracked_metrics.get(func.__name__ , self.global_log_step)
+        _step = self.tracked_metrics.get(func.__name__, self.global_log_step)
         return step % _step == 0 and func.__name__ in self.tracked_metrics
 
     def get_metric(self, metric: str) -> Any:
@@ -122,11 +122,7 @@ class LoggingArgs:
 
         # log to TensorBoard as separate plots
         for layer, norm in layer_grad_norms.items():
-            self.writer.add_scalar(
-                tag=f'Per-layer Gradient Norm/layer{layer}',
-                scalar_value=norm,
-                global_step=step
-            )
+            self.writer.add_scalar(tag=f"Per-layer Gradient Norm/layer{layer}", scalar_value=norm, global_step=step)
 
     @should_log
     def train_loss(self, loss: float, step: int) -> None:
