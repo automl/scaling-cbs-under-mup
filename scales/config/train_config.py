@@ -11,6 +11,7 @@ from litgpt.utils import num_parameters, parse_devices
 
 from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
+from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
 from scales.lr_utils import LRScheduler
@@ -162,7 +163,7 @@ class TrainConfig(BaseConfig):
     """The number of devices to be trained on."""
 
     # model config
-    model_config: Config | None = None
+    model_config: ConfigWrapper | Config | None = None
     """Config object for model config."""
     model_config_path: Path | None = None
     """Config Path for the Config object, ignored if model_config provided."""
@@ -233,6 +234,7 @@ class TrainConfig(BaseConfig):
         )
         # override model block_size
         self.model_config.block_size = self.block_size
+        self.model_config = ConfigWrapper.from_config(self.model_config)
 
         self.trainable_params = num_parameters(GPT(self.model_config), requires_grad=True)
 
@@ -262,7 +264,7 @@ class TrainConfig(BaseConfig):
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
-        yaml_config["model_config"] = Config(**yaml_config["model_config"])
+        yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
         return cls(**yaml_config)
 
 
