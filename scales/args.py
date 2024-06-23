@@ -54,6 +54,7 @@ class LoggingArgs:
         if self.tracked_metrics and self.log_dir:
             self.writer = SummaryWriter(log_dir=self.log_dir)
             self.total_logits_mean = 0
+            self.total_logits_max = 0
             # Warn for typos
             _ = [self.get_metric(metric) for metric in self.tracked_metrics]
         else:
@@ -89,6 +90,17 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Learning Rate", scalar_value=optimizer.param_groups[-1]["lr"], global_step=step)
 
     @should_log
+    def output_logits_max(
+        self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
+    ) -> None:
+        logits_max = logits.max().item()
+        self.total_logits_max += logits_max / accumulation_iters
+        if not is_accumulating:
+            self.total_logits_max = fabric.all_reduce(torch.tensor(self.total_logits_max), reduce_op="max")
+            self.writer.add_scalar(tag="Output Logits/Max", scalar_value=self.total_logits_max, global_step=step)
+            self.total_logits_max = 0
+
+    @should_log
     def output_logits_mean(
         self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
     ) -> None:
@@ -96,7 +108,7 @@ class LoggingArgs:
         self.total_logits_mean += logits_mean / accumulation_iters
         if not is_accumulating:
             self.total_logits_mean = fabric.all_reduce(torch.tensor(self.total_logits_mean), reduce_op="mean")
-            self.writer.add_scalar(tag="Output Logits Mean", scalar_value=self.total_logits_mean, global_step=step)
+            self.writer.add_scalar(tag="Output Logits/Mean", scalar_value=self.total_logits_mean, global_step=step)
             self.total_logits_mean = 0
 
     @should_log

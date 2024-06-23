@@ -116,7 +116,7 @@ def init_state(
             If `save_state_path` is not provided, the state checkpoints will be saved here
         save_init_state: Whether to save the initial state, especially the initialization weights
         load_model_from_path: The path to load the model from (TODO: write what is different here)
-    
+
     Returns:
         dict: The state for training
     """
@@ -228,7 +228,7 @@ def train(
     for i, _batch in enumerate(train_iterator):
         if i == states["train_steps"]:
             break
-    
+
     # main training loop
     for batch in train_iterator:
         if states["train_steps"] + 1 == train_args.train_steps:
@@ -248,6 +248,14 @@ def train(
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
             logger.output_logits_mean(
+                logits=logits,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
+                accumulation_iters=accumulation_iters,
+                last=last_step,
+            )
+            logger.output_logits_max(
                 logits=logits,
                 step=states["train_steps"],
                 fabric=fabric,

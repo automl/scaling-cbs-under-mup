@@ -20,11 +20,11 @@ from scales.config.utils import download_tokenizer, preprocess_wikitext, simple_
 @dataclass
 class DataHandler(BaseConfig):
     """DataHandler class for handling the dataset downloading, processing, and loading.
-    
-    This class defines a dataset and how it was processed, tokenized, split, optimized and saved. 
-    When downloading, this class will create an YAML file in the target folder. 
-    Later when the Dataset is requested again if the arguments of this class matches 
-    the saved configuration in the YAML file the dataset will be loaded, otherwise, 
+
+    This class defines a dataset and how it was processed, tokenized, split, optimized and saved.
+    When downloading, this class will create an YAML file in the target folder.
+    Later when the Dataset is requested again if the arguments of this class matches
+    the saved configuration in the YAML file the dataset will be loaded, otherwise,
     it'll download the dataset again.
 
     WARNING: All fields not passed to the `self.ignore_fields` will be checked
@@ -32,19 +32,19 @@ class DataHandler(BaseConfig):
     """
     # Dataset identifier for the HuggingFace Datasets
     hf_dataset_id: str
-    
+
     # Dataset Subset name for the datasets with multiple subsets
     hf_data_subset_name: str
-    
+
     # Preprocess Dataset before passing into tokenization, used in `Dataset.map(...)` function
     preprocess_fn: Callable[[dict], dict]
-    
+
     # HuggingFace repository ID for the model which we will use the tokenizer of
     tokenizer_repo_id: str
-    
+
     # HuggingFace dataset data_files
     hf_data_files: str | None = None
-    
+
     # Filter function to be called on each dataset object immediately after loading
     filter_function: Callable[[dict], bool] = simple_filter
 
@@ -52,7 +52,7 @@ class DataHandler(BaseConfig):
     #   Takes in at least a single argument, which is the index (or list of indices) of the dataset
     #   and returns a tensor for the corresponding text.
     tokenizer_fn: Callable = tokenize_wikitext
-    
+
     # Root folder which holds tokenizers, binaries, cache folders
     root_data_path: Path = Path(__file__).parent.parent.parent / "data"
 
@@ -65,30 +65,30 @@ class DataHandler(BaseConfig):
     # Split ratios for data splits when either a split specified is not found on the hub
     # or `force_splits` flag is set
     default_split_ratio: list[float] = field(default_factory=lambda: [0.8, 0.1, 0.1])
-    
-    # Forces the loader to load all the splits existing on the hub for the dataset and 
+
+    # Forces the loader to load all the splits existing on the hub for the dataset and
     # split them according to the `default_split_ratio`
     force_splits: bool = False
-    
+
     # Forces to process the dataset again if set
     force_overwrite: bool = False
 
     # `tokenizer_fn` can take multiple arguments if their defaults are specified here
     tokenizer_fn_kwargs: dict[Any, Any] = field(default_factory=dict)
-    
+
     # Seed for splitting datasets and shuffling
     seed: int = 42
 
     # Size of the already subsampled set
     #   e.g: 4M, 47M, used only for loading not for writing
-    #   Note: valid `subsample_size`s are generated only after the 
+    #   Note: valid `subsample_size`s are generated only after the
     #   first time `self.write_subsamples` is called
     # subsample_size: str | None = None
-    
+
     # Valid subsample size indices are: `0`, `1`, `2`
     #   `0` corresponds to the full parent dataset, `1` to 50%, `2` to 5%
     subsample_index: int = 0
-    
+
     # Optimize the data loading for nlp datasets (Will be removed in the next iteration)
     nlp_dataset: bool = True
 
