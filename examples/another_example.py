@@ -19,7 +19,7 @@ if __name__ == "__main__":
         train_conf = TrainConfig(
             init_lr=0.001,
             micro_batch_size=1,
-            block_size=1028,
+            block_size=1024,
             weight_decay=0.001,
             max_val_steps=2,
             n_warmup_steps=None,
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
         # Optionally save configs separately
         eval_config.write_yaml(output_dir=output_dir / "can_name_them_too.yaml")
-        data_handler.write_yaml(data_handler.binary_path)
+        # data_handler.write_yaml(data_handler.binary_path)
         # Or use the Class name as default
         train_conf.write_yaml(output_dir=output_dir)
 
