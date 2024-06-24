@@ -86,6 +86,8 @@ def main(
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
+    with open(out_dir / "train_config.yaml", "w") as f:
+        yaml.dump(train_args.to_dict(), f)
 
     train_time = time.time()
 
@@ -196,7 +198,7 @@ def init_state(
     train_steps = 0
     if train_args.load_state_path is not None:
         # load the state here
-        train_steps, model, optimizer = load_checkpoint_state(
+        train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
             load_state_path=Path(train_args.load_state_path),
             model=model,
             optimizer=optimizer,

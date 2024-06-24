@@ -54,7 +54,7 @@ def load_checkpoint_state(
             np.random.set_state(checkpoint["numpy_rng_state"])
         if "python_rng_state" in checkpoint:
             random.setstate(checkpoint["python_rng_state"])
-    return steps, model, optimizer
+    return steps, model, optimizer, scheduler
 
 
 def save_checkpoint_state(
