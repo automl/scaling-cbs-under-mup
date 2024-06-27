@@ -32,6 +32,8 @@ class ConfigWrapper(BaseConfig):
             n_layer=self.n_layer,
             block_size=self.block_size,
             vocab_size=self.vocab_size,
+            bias=self.bias,
+            lm_head_bias=self.lm_head_bias,
         )
         super().__setattr__("_initialized", True)
         super().__post_init__()
