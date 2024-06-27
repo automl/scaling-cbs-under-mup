@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
 from pprint import pprint
-from typing import Union
 
 import lightning as L
 
@@ -11,7 +12,7 @@ from scales.refactored_pretrain import main
 
 
 def _postprocess_data_handler(
-    data_config: DataHandler, root_data_path: Union[str, Path] = None, seed: int = None, block_size: int = 1024
+    data_config: DataHandler, root_data_path: str | Path | None = None, seed: int | None = None, block_size: int = 1024
 ) -> DataHandler:
     data_config.preprocess_fn = preprocess_wikitext
     data_config.root_data_path = Path(root_data_path) if root_data_path is not None else Path("./").absolute() / "data"

@@ -40,7 +40,7 @@ def collect_res(configs_dir: Path, results_dir: Path, collected_metrics: list[st
         result_file = result_folders[i] / "result.yaml"
         with result_file.open(encoding="utf-8") as yaml_file:
             result = yaml.safe_load(yaml_file)
-        row = collect_values(config, result, collected_metrics)  # type: ignore
+        row = collect_values(config, result, collected_metrics)
         res_list.append(row)
     return pd.DataFrame(res_list)
 

@@ -7,7 +7,6 @@ from typing import Any, Callable
 from warnings import warn
 
 import lightning as L
-import numpy as np
 import torch
 import torch.nn
 from torch.optim import Optimizer
@@ -51,28 +50,25 @@ class LoggingArgs:
 
     def __post_init__(self) -> None:
         """Function to be called after log_dir change."""
+        self.writer = None
         if self.tracked_metrics and self.log_dir:
-            self.writer = SummaryWriter(log_dir=self.log_dir)
-            self.total_logits_mean = 0
-            self.total_logits_max = 0
             # Warn for typos
             _ = [self.get_metric(metric) for metric in self.tracked_metrics]
-        else:
-            self.writer = None
         # resolve logging frequency
         for k, v in self.tracked_metrics.items():
             if v == 0 or v is None:
                 self.tracked_metrics[k] = self.global_log_step
-        if self.suppress_all_logs:
-            # sets the logging frequency to infinity to prevent any logging
-            self.global_log_step = np.inf
-            self.tracked_metrics = {k: np.inf for k in self.tracked_metrics}
 
-    def update_logdir(self, log_dir: str | Path | None) -> None:
-        self.log_dir = log_dir
-        self.__post_init__()
+    def start_logger(self) -> None:
+        if self.tracked_metrics and self.log_dir:
+            self.writer = SummaryWriter(log_dir=self.log_dir)
+            self.total_logits_mean = 0
+            self.total_logits_max = 0
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
+        if self.suppress_all_logs:
+            return False
+        # Ignore step count
         if last:
             return func.__name__ in self.tracked_metrics
         # sets the boolean flag if the metric is in the tracked metrics or to global log step

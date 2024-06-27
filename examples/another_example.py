@@ -28,13 +28,15 @@ if __name__ == "__main__":
             torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
             model_config_path=output_dir.parent / "model.yaml",
             tokens_per_param=20,
-            tracked_metrics=[
-                "train_loss",
-                "validation_loss",
-                "total_gradient_norm",
-                "output_logits_mean",
-                "learning_rate",
-            ],
+            tracked_metrics={
+                "train_loss": 1,
+                "validation_loss": 5,
+                "learning_rate": 1,
+                "total_gradient_norm": 10,
+                "output_logits_mean": 10,
+                "output_logits_max": 10,
+                "gradient_norm_per_layer": 20,
+            },
         )
 
         data_handler = DataHandler(
@@ -68,11 +70,16 @@ if __name__ == "__main__":
 
     fabric = L.Fabric(devices="auto", strategy="auto")
 
-    data_handler = config.data_config
+    data_handler = config.data_config  # type: ignore
 
     pprint(config.train_config)
 
-    result_dict = main(fabric=fabric, data=data_handler, train_args=config.train_config, out_dir=output_dir)
+    result_dict = main(
+        fabric=fabric,
+        data=data_handler,
+        train_args=config.train_config,  # type: ignore
+        out_dir=output_dir,
+    )
 
     if config.eval_config:
         config.eval_config.evaluate()

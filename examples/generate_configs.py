@@ -81,7 +81,7 @@ def generate_configs(
 
     default_pipeline_config = PipelineConfig.from_path(default_config_path)
 
-    config_list = configs_from_grid(default_pipeline_config, config_grid)  # type: ignore
+    config_list = configs_from_grid(default_pipeline_config, config_grid)
     out_path = config_root_path / f"{folder_prefix}=1"
     out_path.mkdir(exist_ok=True)
 

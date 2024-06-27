@@ -8,7 +8,6 @@ from typing import Any
 import lightning as L
 import torch
 import torch.nn.functional as F
-from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.tokenizer import Tokenizer
 from lm_eval import evaluator
@@ -16,6 +15,7 @@ from lm_eval.api.instance import Instance
 from lm_eval.api.model import TemplateLM
 from lm_eval.utils import get_rolling_token_windows, make_disjoint_window, make_table
 
+from scales.config.ConfigWrapper import ConfigWrapper
 from scales.utils import load_checkpoint
 
 
@@ -72,7 +72,7 @@ def convert_and_evaluate(
     save_filepath = out_dir / Path("results.json")
 
     state, _ = load_checkpoint(fabric, checkpoint_dir)
-    model = GPT(Config.from_checkpoint(checkpoint_dir))
+    model = GPT(ConfigWrapper.from_path(checkpoint_dir / "model_config.yaml").config)
     model.load_state_dict(state_dict=state["model"])
     model = fabric.setup(model)
     model.eval()

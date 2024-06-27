@@ -9,6 +9,7 @@ from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters, parse_devices
 
+from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
@@ -203,10 +204,8 @@ class TrainConfig(BaseConfig):
     """Number of steps after which to validate the model."""
 
     # logging details
-    tracked_metrics: list[str] | None = None
-    global_log_step: int = 5
-    log_steps: list[int] | None = None
-    log_dir: str | Path | None = None
+    tracked_metrics: dict[str, int] | None = None
+    global_log_step: int = 1
 
     # seeding
     seed: int = 444
@@ -273,7 +272,13 @@ class TrainConfig(BaseConfig):
             torch_scheduler_args=self.torch_scheduler_args,
         )
 
-        self.tracked_metrics = [] if self.tracked_metrics is None else self.tracked_metrics
+        self.tracked_metrics = {} if self.tracked_metrics is None else self.tracked_metrics
+
+        self.logging_args = LoggingArgs(
+            tracked_metrics=self.tracked_metrics,
+            global_log_step=self.global_log_step,
+            log_dir=None,
+        )
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
@@ -294,11 +299,11 @@ class PipelineConfig(BaseConfig):
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.data_config is None and self.data_config_path and self.data_config_path.exists():
-            self.data_config = DataHandler.from_path(path=self.data_config_path)  # type: ignore
+            self.data_config = DataHandler.from_path(path=self.data_config_path)
         if self.train_config is None and self.train_config_path and self.train_config_path.exists():
-            self.train_config = TrainConfig.from_path(path=self.train_config_path)  # type: ignore
+            self.train_config = TrainConfig.from_path(path=self.train_config_path)
         if self.eval_config is None and self.eval_config_path and self.eval_config_path.exists():
-            self.eval_config = EvalHandler.from_path(path=self.eval_config_path)  # type: ignore
+            self.eval_config = EvalHandler.from_path(path=self.eval_config_path)
 
         assert self.data_config is not None
         assert self.train_config is not None

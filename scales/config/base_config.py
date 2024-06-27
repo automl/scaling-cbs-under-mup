@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 import yaml
 
@@ -29,11 +29,11 @@ def get_field_default(field: dataclasses.Field) -> Any:
     return field.default
 
 
-T = TypeVar("T")
+T = TypeVar("T", bound="BaseConfig")
 
 
 @dataclass
-class BaseConfig(Generic[T]):
+class BaseConfig:
     """Base class to load and save yaml files for configurations."""
 
     def __post_init__(self) -> None:
@@ -57,10 +57,10 @@ class BaseConfig(Generic[T]):
                     dict_[key] = asdict(value)
         return dict_
 
-    def write_yaml(self, output_dir: Path, ignore_defaults: bool = True, name: str = None) -> None:
+    def write_yaml(self, output_dir: Path, ignore_defaults: bool = True, name: str | None = None) -> None:
         config = self.to_dict(ignore_defaults=ignore_defaults)
-        _name = name if name is not None else type(self).__name__
-        yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{_name}.yaml"
+        name = name if name is not None else type(self).__name__
+        yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{name}.yaml"
         print(f"Saving Configration at {str(yaml_path)}")
         with yaml_path.open("w", encoding="utf-8") as yaml_file:
             yaml.dump(config, yaml_file, Dumper=self.yaml_dumper())
@@ -84,7 +84,7 @@ class BaseConfig(Generic[T]):
         return dumper
 
     @classmethod
-    def load_yaml(cls, output_dir: Path) -> dict[str, Any]:
+    def load_yaml(cls: type[T], output_dir: Path) -> dict[str, Any]:
         if isinstance(output_dir, str):
             output_dir = Path(output_dir)
         yaml_path = output_dir if output_dir.suffix == ".yaml" else output_dir / f"{cls.__name__}.yaml"
@@ -96,10 +96,10 @@ class BaseConfig(Generic[T]):
             return {}
 
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> BaseConfig:
+    def from_yaml(cls: type[T], yaml_config: dict[str, Any]) -> T:
         return cls(**yaml_config)
 
     @classmethod
-    def from_path(cls, path: Path) -> BaseConfig:
+    def from_path(cls: type[T], path: Path) -> T:
         yaml_config = cls.load_yaml(output_dir=path)
         return cls.from_yaml(yaml_config)
