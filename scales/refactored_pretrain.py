@@ -9,6 +9,8 @@ Current missing features:
 
 """
 
+from __future__ import annotations
+
 import time
 import warnings
 from pathlib import Path
@@ -40,7 +42,11 @@ def main(
     out_dir = init_out_dir(out_dir)
 
     # Initialize state
-    states = init_state(fabric=fabric, train_args=train_args, out_dir=out_dir)
+    states = init_state(
+        fabric=fabric,
+        train_args=train_args,
+        out_dir=out_dir,
+    )
 
     device_count = parse_devices(devices=train_args.devices)
 
@@ -86,7 +92,7 @@ def main(
     train_time = time.time()
 
     # Training and Validation
-    val_loss = train(
+    result = train(
         fabric=fabric,
         states=states,
         effective_batch_size=effective_batch_size,
@@ -102,10 +108,14 @@ def main(
     fabric.barrier()
     save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
 
+    result_path = train_args.save_state_path / "result.yaml"
+    with result_path.open(mode="w", encoding="utf-8") as file:
+        yaml.dump(result, file)
+
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
 
-    return {"val_loss": val_loss.numpy().tolist()}
+    return result
 
 
 def init_state(
@@ -216,12 +226,13 @@ def train(
     effective_batch_size: int,
     train_dataloader: DataLoader,
     val_dataloader: DataLoader,
-) -> torch.Tensor:
+) -> dict[str, int | list[float] | None]:
     max_seq_length = train_args.block_size
-    logging = train_args.logging_args
+    logger = train_args.logging_args
     tokens_per_step = train_args.block_size * effective_batch_size
     accumulation_iters = train_args.accumulation_iters
 
+    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None}
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
@@ -256,7 +267,7 @@ def train(
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
-            logging.output_logits_mean(
+            logger.output_logits_mean(
                 logits=logits,
                 step=states["train_steps"],
                 fabric=fabric,
@@ -264,7 +275,7 @@ def train(
                 accumulation_iters=accumulation_iters,
                 last=last_step,
             )
-            logging.output_logits_max(
+            logger.output_logits_max(
                 logits=logits,
                 step=states["train_steps"],
                 fabric=fabric,
@@ -289,12 +300,12 @@ def train(
                     max_norm=train_args.clip_max_norm,
                     clip_val=train_args.clip_max_val,
                 )
-            logging.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
-            logging.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
             states["lr_scheduler"].step(
                 steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
             )
-            logging.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
+            logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
             states["optimizer"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
@@ -308,7 +319,7 @@ def train(
             avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
-            logging.train_loss(loss=loss, step=states["train_steps"], last=last_step)
+            logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
                 f" - Current Throughput {current_throughput} - Avg Throughput {avg_throughput}"
@@ -330,8 +341,10 @@ def train(
                 max_seq_length,
                 train_args.max_val_steps,
             )
-            logging.validation_loss(val_loss, step=states["train_steps"], last=last_step)
+            logger.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
+            result["train_steps"] = states["train_steps"]
+            result["val_loss"] = val_loss.detach().cpu().numpy().tolist()
 
         # checkpoint saving
         if (
@@ -345,13 +358,16 @@ def train(
                 scheduler=states["torch_scheduler"],
                 overwrite_checkpoint=train_args.overwrite_state,
             )
+            result_path = train_args.save_state_path / "result.yaml"
+            with result_path.open(mode="w", encoding="utf-8") as file:
+                yaml.dump(result, file)
 
         if last_step is True:
             break
     # end of training loop
-    logging.close()
+    logger.close()
 
-    return val_loss.detach().cpu()
+    return result
 
 
 @torch.no_grad()

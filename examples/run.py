@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 import torch
-import yaml
 from jsonargparse import CLI
 from lightning import Fabric
 
@@ -45,9 +44,9 @@ def run(
     pipe_config = PipelineConfig.from_path(config_path)
     pipe_updated = False
 
-    if data_root_path is not None and pipe_config.data_config.root_data_path != data_root_path:
+    if data_root_path is not None and pipe_config.data_config.root_data_path != data_root_path:  # type: ignore
         # Update the root path for the data (since it's cluster specific)
-        pipe_config.data_config.root_data_path = data_root_path
+        pipe_config.data_config.root_data_path = data_root_path  # type: ignore
         pipe_updated = True
 
     fabric = Fabric(devices="auto", strategy="auto")
@@ -56,16 +55,13 @@ def run(
     train_config = pipe_config.train_config
     # eval_handler = pipe_config.eval_config
     try:
-        result = main(
+        main(
             fabric=fabric,
-            train_args=train_config,
-            data=data_handler,
+            train_args=train_config,  # type: ignore
+            data=data_handler,  # type: ignore
             out_dir=output_path,
             access_internet=access_internet,
         )
-        result_path = output_path / "result.yaml"
-        with result_path.open(mode="w", encoding="utf-8") as file:
-            yaml.dump(result, file)
     except torch.cuda.OutOfMemoryError:
         # in case of a memory error bump the config to the next config group
         # Expected config parent folder name: "some_text=some_number"
