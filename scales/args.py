@@ -63,7 +63,7 @@ class LoggingArgs:
         if self.tracked_metrics and self.log_dir:
             self.writer = SummaryWriter(log_dir=self.log_dir)
             self.total_logits_mean = 0
-            self.total_logits_max = 0
+            self.total_logits_max = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
         if self.suppress_all_logs:
@@ -90,11 +90,14 @@ class LoggingArgs:
         self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
     ) -> None:
         logits_max = logits.max().item()
-        self.total_logits_max += logits_max / accumulation_iters
+        if self.total_logits_max is not None:
+            self.total_logits_max = max(self.total_logits_max, logits_max)
+        else:
+            self.total_logits_max = logits_max
         if not is_accumulating:
             self.total_logits_max = fabric.all_reduce(torch.tensor(self.total_logits_max), reduce_op="max")
             self.writer.add_scalar(tag="Output Logits/Max", scalar_value=self.total_logits_max, global_step=step)
-            self.total_logits_max = 0
+            self.total_logits_max = None
 
     @should_log
     def output_logits_mean(
