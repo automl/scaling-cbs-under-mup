@@ -1,76 +1,88 @@
+from __future__ import annotations
+
 import logging
+import random
 from pathlib import Path
 from typing import Any
 
 import lightning as L
 import neps
-from neps.utils.common import get_initial_directory
+from jsonargparse import CLI
 
-from scales.args import LoggingArgs
-from scales.config.data_config import DataHandler, preprocess_wikitext
-from scales.lr_utils import ConstantLR
-from scales.pretrain_pipeline import main
-
-pipeline_space = {
-    "lr": neps.FloatParameter(lower=1e-5, upper=5e-3, log=True, default=1e-3),
-    "wd": neps.FloatParameter(lower=1e-5, upper=5e-3, log=True, default=1e-4),
-    "steps": neps.IntegerParameter(lower=2, upper=10, is_fidelity=True),
-}
+from scales.config import DataHandler, TrainConfig
+from scales.config.ConfigWrapper import ConfigWrapper
+from scales.config.utils import preprocess_wikitext
+from scales.refactored_pretrain import main
 
 
-def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **hparams: Any) -> float:
-    fabric = L.Fabric(accelerator="auto", strategy="auto")
+def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 444) -> None:
+    random.seed(seed)
+    if data_dir is not None and isinstance(data_dir, str):
+        data_root_path = Path(data_dir)
+        assert data_root_path.exists(), f"The root data folder {data_root_path} does not exist"
+    if isinstance(root_dir, str):
+        output_root_dir = Path(root_dir)
+        assert output_root_dir.exists(), f"The root_output_dir {output_root_dir} does not exist"
+        assert output_root_dir.is_dir(), "output_root_dir must be a directory"
 
     data = DataHandler(
         hf_dataset_id="wikitext",
-        hf_data_subset_name="wikitext-2-v1",
+        hf_data_subset_name="wikitext-103-v1",
         tokenizer_repo_id="openai-community/gpt2",
         preprocess_fn=preprocess_wikitext,
         force_splits=True,
     )
 
-    lr_details = ConstantLR(init_lr=hparams["lr"])
+    pipeline_space = {
+        "lr": neps.FloatParameter(lower=1e-5, upper=1e-1, log=True, default=1e-3),
+        "wd": neps.FloatParameter(lower=1e-5, upper=1e-1, log=False, default=1e-2),
+        "warmup_steps": neps.IntegerParameter(lower=0, upper=3000, default=0),
+        "eta_min": neps.FloatParameter(lower=0.0, upper=1e-5, log=True, default=0.0),
+    }
 
-    initial_directory = get_initial_directory(pipeline_directory) / "runs"
+    def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **hparams: Any) -> float:
+        fabric = L.Fabric(accelerator="auto", strategy="auto")
 
-    logging = LoggingArgs(
-        train_loss=True, validation_loss=True, learning_rate=True, log_step=1, log_dir=initial_directory
-    )
-
-    if previous_pipeline_directory is None:
-        result_dict = main(
-            fabric=fabric,
-            data=data,
-            lr_details=lr_details,
-            logging=logging,
-            out_dir=pipeline_directory / "output",
-            hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
-            model_config_file="model.yaml",
-            max_train_steps=hparams["steps"],
+        train_conf = TrainConfig(
+            init_lr=hparams.pop("lr"),
+            micro_batch_size=8,
+            accumulation_iters=4,
+            block_size=1024,
+            weight_decay=hparams.pop("wd"),
             max_val_steps=2,
+            n_warmup_steps=hparams.pop("warmup_steps"),
+            n_main_steps=None,
+            n_cooldown_steps=None,
+            save_state_every=1000,
+            torch_scheduler="CosineAnnealingLR",
+            torch_scheduler_args={"T_max": None, "eta_min": hparams.pop("eta_min")},
+            model_config=ConfigWrapper(d_model=256, n_layer=12, n_head=2),
+            max_train_steps=10000,
+            tracked_metrics={
+                "train_loss": 1,
+                "validation_loss": 5,
+                "learning_rate": 1,
+                "total_gradient_norm": 10,
+                "output_logits_mean": 10,
+                "output_logits_max": 10,
+                "gradient_norm_per_layer": 20,
+            },
+            seed=random.randint(0, 100),
         )
-    else:
-        result_dict = main(
-            fabric=fabric,
-            data=data,
-            logging=logging,
-            out_dir=pipeline_directory / "output",
-            hparams={"weight_decay": hparams["wd"], "batch_size": 4, "block_size": 1028},
-            load_model_from_path=previous_pipeline_directory / "output",
-            max_train_steps=hparams["steps"],
-            max_val_steps=2,
-        )
 
-    return result_dict["val_loss"]
+        result_dict = main(fabric=fabric, data=data, train_args=train_conf, out_dir=pipeline_directory)
 
+        return result_dict["val_loss"]
 
-if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     neps.run(
         run_pipeline=run_pipeline,
         pipeline_space=pipeline_space,
-        root_directory="result",
-        max_evaluations_total=10,
-        searcher="priorband",
-        sample_default_first=True,
+        root_directory=root_dir,
+        max_evaluations_total=120,
+        searcher="random_search",
     )
+
+
+if __name__ == "__main__":
+    CLI(launch_neps)
