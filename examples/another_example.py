@@ -36,6 +36,8 @@ if __name__ == "__main__":
                 "output_logits_mean": 10,
                 "output_logits_max": 10,
                 "gradient_norm_per_layer": 20,
+                "max_attention_logits_per_layer": 5,
+                "max_attention_logits_all": 5,
             },
         )
 

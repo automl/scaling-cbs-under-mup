@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List
 from warnings import warn
 
 import lightning as L
@@ -63,6 +63,8 @@ class LoggingArgs:
         if self.tracked_metrics and self.log_dir:
             self.writer = SummaryWriter(log_dir=self.log_dir)
             self.total_logits_mean = 0
+            self.max_attn_logit = None
+            self.max_attn_logits_per_layer: list[float] = []
             self.total_logits_max = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
@@ -111,12 +113,42 @@ class LoggingArgs:
             self.total_logits_mean = 0
 
     @should_log
+    def max_attention_logits_per_layer(
+        self, attn_logits: List, step: int, fabric: L.Fabric, is_accumulating: bool
+    ) -> None:
+        if not attn_logits:
+            raise ValueError("Error happened during sharing the attn_logits from the model")
+        if not self.max_attn_logits_per_layer:
+            self.max_attn_logits_per_layer = attn_logits
+        else:
+            self.max_attn_logits_per_layer = [max(a, b) for a, b in zip(self.max_attn_logits_per_layer, attn_logits)]
+        if not is_accumulating:
+            self.max_attn_logits_per_layer = fabric.all_reduce(self.max_attn_logits_per_layer, reduce_op="max")
+            for i, logit in enumerate(self.max_attn_logits_per_layer):
+                self.writer.add_scalar(tag=f"Max Attention Logits/Layer{i}", scalar_value=logit, global_step=step)
+            self.max_attn_logits_per_layer = []
+
+    @should_log
+    def max_attention_logits_all(self, attn_logits: List, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
+        if not attn_logits:
+            raise ValueError("Error happened during sharing the attn_logits from the model")
+        if self.max_attn_logit is None:
+            self.max_attn_logit = max(attn_logits)
+        else:
+            max_between_logits = max(attn_logits)
+            self.max_attn_logit = max(max_between_logits, self.max_attn_logit)
+        if not is_accumulating:
+            self.max_attn_logit = fabric.all_reduce(self.max_attn_logit, reduce_op="max")
+            self.writer.add_scalar(tag="Max Attention Logits/All", scalar_value=self.max_attn_logit, global_step=step)
+            self.max_attn_logit = None
+
+    @should_log
     def total_gradient_norm(self, model: torch.nn.Module, step: int) -> None:
         total_norm = total_gradient_l2_norm(model)
         self.writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=step)
 
     @should_log
-    def gradient_norm_per_layer(self, model: torch.nn.module, step: int) -> None:
+    def gradient_norm_per_layer(self, model: torch.nn.Module, step: int) -> None:
         layer_grad_norms = gradient_l2_norm_per_layer(model, step)
 
         # log to TensorBoard as separate plots

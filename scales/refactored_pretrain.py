@@ -20,14 +20,19 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.model import GPT, Config
+from litgpt.model import Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
 from torch.utils.data import DataLoader
 
-# from scales.lr_utils import LRScheduler
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
-from scales.utils import load_checkpoint, load_checkpoint_state, save_checkpoint, save_checkpoint_state
+from scales.model import GPT_Scales, file_data_share
+from scales.utils import (
+    load_checkpoint,
+    load_checkpoint_state,
+    save_checkpoint,
+    save_checkpoint_state,
+)
 
 
 def main(
@@ -108,9 +113,10 @@ def main(
     fabric.barrier()
     save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
 
-    result_path = train_args.save_state_path / "result.yaml"
-    with result_path.open(mode="w", encoding="utf-8") as file:
-        yaml.dump(result, file)
+    if train_args.save_state_path is not None:
+        result_path = train_args.save_state_path / "result.yaml"
+        with result_path.open(mode="w", encoding="utf-8") as file:
+            yaml.dump(result, file)
 
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
@@ -146,7 +152,7 @@ def init_state(
 
     if load_model_from_path is None:
         states: Dict[str, Any] = {}
-        model = GPT(train_args.model_config)
+        model = GPT_Scales(train_args.model_config)
     else:
         if train_args.model_config_path or train_args.model_name:
             warnings.warn(
@@ -155,7 +161,7 @@ def init_state(
             )
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
-        model = GPT(config)
+        model = GPT_Scales(config)
         train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
 
@@ -283,6 +289,18 @@ def train(
                 accumulation_iters=accumulation_iters,
                 last=last_step,
             )
+            logger.max_attention_logits_per_layer(
+                attn_logits=file_data_share.layer_wise_max_attn_weight,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
+            )
+            logger.max_attention_logits_all(
+                attn_logits=file_data_share.layer_wise_max_attn_weight,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
+            )
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
@@ -358,9 +376,12 @@ def train(
                 scheduler=states["torch_scheduler"],
                 overwrite_checkpoint=train_args.overwrite_state,
             )
-            result_path = train_args.save_state_path / "result.yaml"
-            with result_path.open(mode="w", encoding="utf-8") as file:
-                yaml.dump(result, file)
+            if train_args.save_state_path is not None:
+                result_path = train_args.save_state_path / "result.yaml"
+                with result_path.open(mode="w", encoding="utf-8") as file:
+                    yaml.dump(result, file)
+
+        file_data_share.clear_data()
 
         if last_step is True:
             break
