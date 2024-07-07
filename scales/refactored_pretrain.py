@@ -161,8 +161,8 @@ def init_state(
                 "`model_config_file` and `model_name` are ignored"
             )
         states, model_path = load_checkpoint(fabric, load_model_from_path)
-        config = Config.from_file(model_path, mup=train_args.load_base_shape_path is not None)
-        model = GPT_Scales(config)
+        config = Config.from_file(model_path)
+        model = GPT_Scales(config, mup=train_args.load_base_shape_path is not None)
         train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
 
