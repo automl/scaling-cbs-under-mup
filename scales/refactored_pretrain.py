@@ -22,6 +22,7 @@ import torch.nn as nn
 import yaml
 from litgpt.model import Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
+from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
@@ -152,7 +153,7 @@ def init_state(
 
     if load_model_from_path is None:
         states: Dict[str, Any] = {}
-        model = GPT_Scales(train_args.model_config)
+        model = GPT_Scales(train_args.model_config, mup=train_args.load_base_shape_path is not None)
     else:
         if train_args.model_config_path or train_args.model_name:
             warnings.warn(
@@ -160,7 +161,7 @@ def init_state(
                 "`model_config_file` and `model_name` are ignored"
             )
         states, model_path = load_checkpoint(fabric, load_model_from_path)
-        config = Config.from_file(model_path)
+        config = Config.from_file(model_path, mup=train_args.load_base_shape_path is not None)
         model = GPT_Scales(config)
         train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
@@ -170,11 +171,18 @@ def init_state(
     if lr_details is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
-    model = fabric.setup(model)
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
-    )
+    if train_args.load_base_shape_path:
+        fabric.print("Using MuP")
+        set_base_shapes(model, train_args.load_base_shape_path)
+        optimizer = MuAdamW(
+            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+        )
+        model = fabric.setup(model)
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+        )
+        model = fabric.setup(model)
 
     if train_args.lr_scheduler.torch_scheduler is not None:
         torch_scheduler = train_args.lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
@@ -320,9 +328,9 @@ def train(
                 )
             logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
-            states["lr_scheduler"].step(
-                steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
-            )
+            # states["lr_scheduler"].step(
+            #     steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
+            # )
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
             states["optimizer"].step()
             states["optimizer"].zero_grad()

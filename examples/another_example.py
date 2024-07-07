@@ -2,6 +2,7 @@ from pathlib import Path
 from pprint import pprint
 
 import lightning as L
+from litgpt.config import Config
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import PipelineConfig, TrainConfig
@@ -9,7 +10,7 @@ from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
 
 if __name__ == "__main__":
-    output_dir = Path(__file__).parent / "output"
+    output_dir = Path(__file__).parent / "output/width32"
 
     if (output_dir / "PipelineConfig.yaml").exists():
         config = PipelineConfig.from_path(output_dir / "PipelineConfig.yaml")
@@ -26,8 +27,7 @@ if __name__ == "__main__":
             n_cooldown_steps=None,
             torch_scheduler="CosineAnnealingLR",
             torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
-            model_config_path=output_dir.parent / "model.yaml",
-            tokens_per_param=20,
+            model_config=Config(block_size=512, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=32),
             tracked_metrics={
                 "train_loss": 1,
                 "validation_loss": 5,
@@ -39,6 +39,7 @@ if __name__ == "__main__":
                 "max_attention_logits_per_layer": 5,
                 "max_attention_logits_all": 5,
             },
+            max_train_steps=100,
         )
 
         data_handler = DataHandler(

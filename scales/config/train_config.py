@@ -203,6 +203,10 @@ class TrainConfig(BaseConfig):
     validate_every: int = 5
     """Number of steps after which to validate the model."""
 
+    # MuParam width
+    load_base_shape_path: str | Path | None = None
+    """The path of the base model shape, needs to be stored before running mup."""
+
     # logging details
     tracked_metrics: dict[str, int] | None = None
     global_log_step: int = 1
