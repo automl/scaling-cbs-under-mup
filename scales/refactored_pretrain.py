@@ -154,6 +154,8 @@ def init_state(
     if load_model_from_path is None:
         states: Dict[str, Any] = {}
         model = GPT_Scales(train_args.model_config, mup=train_args.load_base_shape_path is not None)
+        if train_args.load_base_shape_path:
+            set_base_shapes(model, train_args.load_base_shape_path)
     else:
         if train_args.model_config_path or train_args.model_name:
             warnings.warn(
@@ -163,6 +165,8 @@ def init_state(
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT_Scales(config, mup=train_args.load_base_shape_path is not None)
+        if train_args.load_base_shape_path:
+            set_base_shapes(model, train_args.load_base_shape_path, rescale_params=False)
         train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
 
@@ -172,8 +176,7 @@ def init_state(
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
     if train_args.load_base_shape_path:
-        fabric.print("Using MuP")
-        set_base_shapes(model, train_args.load_base_shape_path)
+        fabric.print("Using MuP Optimizer")
         optimizer = MuAdamW(
             model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
         )
