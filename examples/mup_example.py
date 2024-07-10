@@ -13,6 +13,9 @@ from scales.refactored_pretrain import main
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parser for MuP training")
     parser.add_argument("--width", type=int, default=64, help="width of the GPT model")
+    parser.add_argument(
+        "--accumulation_steps", type=int, default=1, help="Accumulation iterations for effective batch size"
+    )
     args = parser.parse_args()
 
     output_dir = Path(__file__).parent / f"output/width{args.width}"
@@ -55,8 +58,6 @@ if __name__ == "__main__":
     )
 
     config = PipelineConfig(data_config=data_handler, train_config=train_conf, eval_config=None)
-    config.write_yaml(output_dir)
-
     fabric = L.Fabric(devices="auto", strategy="auto")
 
     data_handler = config.data_config
