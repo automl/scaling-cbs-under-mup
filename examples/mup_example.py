@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from pprint import pprint
 
@@ -10,20 +11,24 @@ from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
 
 if __name__ == "__main__":
-    output_dir = Path(__file__).parent / "output/width64"
+    parser = argparse.ArgumentParser(description="Parser for MuP training")
+    parser.add_argument("--width", type=int, default=64, help="width of the GPT model")
+    args = parser.parse_args()
+
+    output_dir = Path(__file__).parent / f"output/width{args.width}"
 
     train_conf = TrainConfig(
         init_lr=0.001,
         micro_batch_size=1,
         block_size=1024,
-        weight_decay=0.001,
+        weight_decay=0,
         max_val_steps=2,
         n_warmup_steps=None,
         n_main_steps=None,
         n_cooldown_steps=None,
         torch_scheduler="CosineAnnealingLR",
         torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
-        model_config=Config(block_size=512, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=64),
+        model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=args.width),
         tracked_metrics={
             "train_loss": 1,
             "validation_loss": 5,
