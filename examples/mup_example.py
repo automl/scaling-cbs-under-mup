@@ -16,13 +16,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--accumulation_steps", type=int, default=1, help="Accumulation iterations for effective batch size"
     )
+    parser.add_argument("--micro_batch_size", type=int, default=8, help="The micro batch size")
     args = parser.parse_args()
 
     output_dir = Path(__file__).parent / f"output/width{args.width}"
 
     train_conf = TrainConfig(
         init_lr=0.001,
-        micro_batch_size=1,
+        micro_batch_size=args.micro_batch_size,
         block_size=1024,
         weight_decay=0,
         max_val_steps=2,
