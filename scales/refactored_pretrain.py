@@ -257,15 +257,15 @@ def train(
 
     # main training loop
     for batch in train_iterator:
-        if states["train_steps"] + 1 == train_args.train_steps:
+        is_accumulating = (loop_iters + 1) % accumulation_iters != 0
+
+        if states["train_steps"] + 1 == train_args.train_steps and is_accumulating:
             last_step = True
         elif states["train_steps"] > train_args.train_steps:
             raise ValueError("Something unexpected during training has led to more train steps.")
 
         if loop_iters == 0:
             start_time = time.time()
-
-        is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
