@@ -33,7 +33,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
 
     train_conf = TrainConfig(
         init_lr=hparams.get("lr"),  # type: ignore
-        micro_batch_size=1,
+        micro_batch_size=8,
         block_size=1024,
         weight_decay=0.0,
         max_val_steps=2,
@@ -65,7 +65,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         fabric=fabric,
         data=data_handler,  # type: ignore
         train_args=config.train_config,  # type: ignore
-        out_dir=pipeline_directory,
+        out_dir=pipeline_directory / "gpt_output",
     )
 
     return result_dict["val_loss"]
