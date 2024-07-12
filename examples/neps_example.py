@@ -13,17 +13,18 @@ from scales.config import DataHandler, TrainConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
+from neps.plot.tensorboard_eval import tblogger
 
 
-def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 444) -> None:
+def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 449) -> None:
     random.seed(seed)
     if data_dir is not None and isinstance(data_dir, str):
         data_root_path = Path(data_dir)
         assert data_root_path.exists(), f"The root data folder {data_root_path} does not exist"
     if isinstance(root_dir, str):
-        output_root_dir = Path(root_dir)
-        assert output_root_dir.exists(), f"The root_output_dir {output_root_dir} does not exist"
-        assert output_root_dir.is_dir(), "output_root_dir must be a directory"
+        root_dir = Path(root_dir)
+        assert root_dir.parent.exists(), f"The root_dir {root_dir} does not exist"
+        assert root_dir.parent.is_dir(), "root_dir must be a directory"
 
     data = DataHandler(
         hf_dataset_id="wikitext",
@@ -37,7 +38,7 @@ def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 444) -> 
         "lr": neps.FloatParameter(lower=1e-5, upper=1e-1, log=True, default=1e-3),
         "wd": neps.FloatParameter(lower=1e-5, upper=1e-1, log=False, default=1e-2),
         "warmup_steps": neps.IntegerParameter(lower=0, upper=3000, default=0),
-        "eta_min": neps.FloatParameter(lower=0.0, upper=1e-5, log=True, default=0.0),
+        "eta_min": neps.FloatParameter(lower=0.0, upper=1e-5, log=False, default=0.0),
     }
 
     def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **hparams: Any) -> float:
@@ -70,7 +71,16 @@ def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 444) -> 
             seed=random.randint(0, 100),
         )
 
-        result_dict = main(fabric=fabric, data=data, train_args=train_conf, out_dir=pipeline_directory)
+        output_dir = pipeline_directory / "output"
+        output_dir.mkdir(exist_ok=True)
+
+        result_dict = main(fabric=fabric, data=data, train_args=train_conf, out_dir=output_dir)
+
+        tblogger.log(loss=result_dict["val_loss"],
+                     current_epoch=1,
+                     writer_config_hparam=True,
+                     write_summary_incumbent=False,
+                     writer_config_scalar=False)
 
         return result_dict["val_loss"]
 
