@@ -91,8 +91,9 @@ def main(
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
-    with open(out_dir / "train_config.yaml", "w") as f:
-        yaml.dump(train_args.to_dict(), f)
+    
+    # Note, this train_args is NOT the same as the one passed to the function
+    train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
 
     train_time = time.time()
 

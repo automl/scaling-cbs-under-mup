@@ -282,7 +282,11 @@ class TrainConfig(BaseConfig):
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
-        yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+        try:
+            yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+        except TypeError:
+            # Depending on if the train_config was saved with defaults or not the model_config might have extra arguments
+            yaml_config["model_config"] = ConfigWrapper.from_config(Config(**yaml_config["model_config"]))
         return cls(**yaml_config)
 
 
