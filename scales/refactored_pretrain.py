@@ -238,7 +238,7 @@ def train(
     tokens_per_step = train_args.block_size * effective_batch_size
     accumulation_iters = train_args.accumulation_iters
 
-    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None}
+    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None, "train_loss": None}
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
@@ -337,6 +337,7 @@ def train(
             avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
+            result["train_loss"] = loss.item()
             logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
