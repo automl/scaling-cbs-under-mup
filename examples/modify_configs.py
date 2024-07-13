@@ -24,6 +24,17 @@ def change_dataset(config: PipelineConfig,
     config.data_config.hf_data_subset_name = hf_data_subset_name
     return config
 
+def change_logging(config: PipelineConfig,
+                   global_log_step: int = 1,
+                   tracked_metrics: dict[str, int] = {},
+                   log_dir: str | Path | None = None,
+                   suppress_all_logs: bool = False):
+    config.train_config.global_log_step = global_log_step
+    config.train_config.tracked_metrics = tracked_metrics
+    config.train_config.log_dir = log_dir
+    config.train_config.suppress_all_logs = suppress_all_logs
+    return config
+
 
 def collect_configs(configs_folder: Path | None = None, config_pathes: list[Path] | None = None) -> list[Path]:
     config_pathes = [] if config_pathes is None else config_pathes
@@ -45,7 +56,8 @@ def modify_function(config_path: Path, **kwargs: Any) -> PipelineConfig:
     config = load_config(config_path)
     # Modify Config Here
     # output_root_folder = kwargs.pop("output_root_folder", None)
-    change_load_state_path(config, config_path, **kwargs)
+    # change_load_state_path(config, config_path, **kwargs)
+    change_logging(config, **kwargs)
     # change_dataset(config, **kwargs)
     # Modify Config End
     return config
@@ -75,14 +87,24 @@ if __name__ == "__main__":
     configs_folder: Path | None = Path(
         "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
     )
+    configs_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_selected/run=1")
     config_pathes: list[Path] | None = None
     output_root_folder: Path | None = Path(
         "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
     )
-    copy_to_folder: Path | None = "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
+    # copy_to_folder: Path | None = "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
     copy_to_folder = None
     modify_configs(configs_folder, config_pathes, 
-                   output_root_folder=output_root_folder, 
+                #    output_root_folder=output_root_folder, 
+                tracked_metrics={"learning_rate": 1, 
+                                 "train_loss": 1, 
+                                 "output_logits_max": 10,
+                                 "output_logits_mean": 10,
+                                 "max_attention_logits_per_layer": 10,
+                                 "max_attention_logits_all": 10,
+                                 "total_gradient_norm": 20,
+                                 "gradient_norm_per_layer": 20,
+                                 "validation_loss": 5,},
                 #    copy_to_folder=copy_to_folder,
                 #    hf_dataset_id="DKYoon/SlimPajama-6B",
                 #    hf_data_subset_name=""

@@ -74,6 +74,10 @@ def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 449) -> 
         output_dir = pipeline_directory / "output"
         output_dir.mkdir(exist_ok=True)
 
+        config_name = pipeline_directory.name
+        train_conf.write_yaml(output_dir / f"train_config.yaml", ignore_defaults=False)
+        data.write_yaml(output_dir / f"data_config.yaml", ignore_defaults=False)
+
         result_dict = main(fabric=fabric, data=data, train_args=train_conf, out_dir=output_dir)
 
         tblogger.log(loss=result_dict["val_loss"],
