@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
+from scales.log_utils import load_tb
 from scales.model import GPT_Scales, file_data_share
 from scales.utils import (
     load_checkpoint,
@@ -91,7 +92,7 @@ def main(
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
-    
+
     # Note, this train_args is NOT the same as the one passed to the function
     train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
 
@@ -113,6 +114,8 @@ def main(
 
     fabric.barrier()
     save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
+    df = load_tb(output_dir=out_dir, train_config_file_name="train_config_post_init")
+    df.to_csv(str(out_dir / "tb_logs.csv"))
 
     if train_args.save_state_path is not None:
         result_path = train_args.save_state_path / "result.yaml"

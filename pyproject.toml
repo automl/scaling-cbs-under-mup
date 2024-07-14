@@ -18,6 +18,7 @@ numpy = "^1.0"  # to prevent 2.0 from being installed
 
 #litgpt = {path = "../litgpt", extras = ["all"], develop = true}
 #lm_eval = {path = "../lm-evaluation-harness", develop = true}
+tbparse = "^0.0.8"
 
 
 

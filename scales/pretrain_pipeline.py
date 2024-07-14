@@ -13,8 +13,8 @@ from litgpt.model import GPT, Config
 from litgpt.utils import CycleIterator, init_out_dir, num_parameters, parse_devices
 from torch.utils.data import DataLoader
 
-from scales.args import LoggingArgs
 from scales.config.data_config import DataHandler
+from scales.log_utils import LoggingArgs
 from scales.lr_utils import LRScheduler
 from scales.utils import load_checkpoint, save_checkpoint
 

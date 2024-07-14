@@ -9,11 +9,11 @@ from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters, parse_devices
 
-from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
+from scales.log_utils import LoggingArgs
 from scales.lr_utils import LRScheduler
 
 
@@ -285,7 +285,8 @@ class TrainConfig(BaseConfig):
         try:
             yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
         except TypeError:
-            # Depending on if the train_config was saved with defaults or not the model_config might have extra arguments
+            # Depending on if the train_config was saved with defaults or not
+            # the model_config might have extra arguments
             yaml_config["model_config"] = ConfigWrapper.from_config(Config(**yaml_config["model_config"]))
         return cls(**yaml_config)
 
