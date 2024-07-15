@@ -13,7 +13,7 @@ from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
-from scales.log_utils import LoggingArgs
+from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
 
 

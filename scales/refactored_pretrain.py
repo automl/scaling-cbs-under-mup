@@ -26,8 +26,8 @@ from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
-from scales.log_utils import load_tb
 from scales.model import GPT_Scales, file_data_share
+from scales.tblog_utils import load_tb
 from scales.utils import (
     load_checkpoint,
     load_checkpoint_state,

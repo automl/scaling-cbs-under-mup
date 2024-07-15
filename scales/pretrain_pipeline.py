@@ -14,7 +14,7 @@ from litgpt.utils import CycleIterator, init_out_dir, num_parameters, parse_devi
 from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
-from scales.log_utils import LoggingArgs
+from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
 from scales.utils import load_checkpoint, save_checkpoint
 

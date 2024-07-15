@@ -7,40 +7,12 @@ from typing import Any, Callable, List
 from warnings import warn
 
 import lightning as L
-import pandas as pd
 import torch
 import torch.nn
-from tbparse import SummaryReader
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.config import TrainConfig
 from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm
-
-MODEL_HPARAMS = ["block_size", "batch_size", "d_model", "n_layer", "n_head", "head_size"]
-
-
-def load_tb(output_dir: str | Path, train_config_file_name: str | None = "train_config_post_init") -> pd.DataFrame:
-    output_dir = Path(output_dir)
-    log_dir = output_dir / "logs"
-    reader = SummaryReader(str(log_dir))
-    df = pd.pivot_table(reader.scalars, values="value", columns="tag", index="step").ffill()
-
-    if train_config_file_name is None:
-        return df
-
-    # Get HPs from written config file
-    train_config_path = output_dir / f"{train_config_file_name}.yaml"
-    train_config = TrainConfig.from_path(train_config_path)
-    model_config = train_config.model_config
-
-    for hp_name in MODEL_HPARAMS:
-        if hp_name == "batch_size":
-            df[hp_name] = train_config.accumulation_iters * train_config.micro_batch_size
-        else:
-            df[hp_name] = getattr(model_config, hp_name, None)
-
-    return df
 
 
 def should_log(func: Callable) -> Callable:
