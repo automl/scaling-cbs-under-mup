@@ -166,7 +166,6 @@ def init_state(
         states, model_path = load_checkpoint(fabric, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT_Scales(config)
-        train_args.lr_scheduler = states["lr_scheduler"]
         model.load_state_dict(states["model"])
 
     lr_details = train_args.lr_scheduler
@@ -177,7 +176,7 @@ def init_state(
     model = fabric.setup(model)
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+        model.parameters(), lr=lr_details.max_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
     )
 
     if train_args.lr_scheduler.torch_scheduler is not None:
@@ -223,7 +222,6 @@ def init_state(
     states["train_steps"] = train_steps
     states["model"] = model
     states["optimizer"] = optimizer
-    states["lr_scheduler"] = train_args.lr_scheduler
     states["torch_scheduler"] = torch_scheduler
 
     return states
@@ -324,7 +322,7 @@ def train(
                 )
             logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
-            states["lr_scheduler"].step(
+            train_args.lr_scheduler.step(
                 steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
             )
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
