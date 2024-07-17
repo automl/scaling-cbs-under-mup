@@ -14,22 +14,34 @@ from litgpt.utils import save_config
 from scales.lr_utils import LRScheduler
 
 
-def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path) -> None:
+def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path, train_step: int | None = None) -> None:
+    checkpoint_name = "lit_model.pth"
+    if train_step is not None:
+        checkpoint_name = f"lit_model_{train_step}.pth"
     checkpoint_dir = Path(checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     fabric.print(f"Saving state to {str(checkpoint_dir)}")
-    fabric.save(Path(checkpoint_dir / "lit_model.pth"), state)
+    # This will save all torch related artifacts with their state_dict
+    fabric.save(Path(checkpoint_dir / checkpoint_name), state)
+    # TODO: save random state
     fabric.print(checkpoint_dir.parent)
     if fabric.global_rank == 0:
         save_config(state["model"].config, checkpoint_dir)
 
 
-def load_checkpoint(fabric: L.Fabric, checkpoint_dir: str | Path) -> tuple[dict, Path]:
+def load_checkpoint(
+    fabric: L.Fabric, state: dict | None, checkpoint_dir: str | Path, train_step: int | None = None
+) -> tuple[dict, Path]:
+    checkpoint_name = "lit_model.pth"
+    if train_step is not None:
+        checkpoint_name = f"lit_model_{train_step}.pth"
     checkpoint_dir = Path(checkpoint_dir)
     fabric.print(f"Loading state from {str(checkpoint_dir)}")
-    state = fabric.load(path=Path(checkpoint_dir / "lit_model.pth"))
+    # This will load all torch related artifacts with their state dictionary,
+    remainder = fabric.load(path=Path(checkpoint_dir / checkpoint_name), state=state)
+    # TODO: Load random states
     model_config_path = Path(checkpoint_dir / "model_config.yaml")
-    return state, model_config_path
+    return remainder, model_config_path
 
 
 def load_checkpoint_state(
@@ -96,6 +108,6 @@ def gradient_l2_norm_per_layer(model: nn.Module, global_step: int) -> dict:
     for name, param in model.named_parameters():
         if "transformer.h" in name and param.grad is not None and param.requires_grad:
             layer_id = name.split(".transformer.h.")[-1].split(".")[0]  # extract the layer ID
-            layer_grad_norms[layer_id].append(param.norm(2).item() ** 2)
+            layer_grad_norms[layer_id].append(param.grad.norm(2).item() ** 2)
     # calculating norm for each layer by summing the square of each parameter's gradient
     return {k: np.sum(v) ** 0.5 for k, v in layer_grad_norms.items()}

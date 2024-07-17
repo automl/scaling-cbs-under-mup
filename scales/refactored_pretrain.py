@@ -12,7 +12,6 @@ Current missing features:
 from __future__ import annotations
 
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict
 
@@ -20,7 +19,6 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.model import Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
 from torch.utils.data import DataLoader
 
@@ -30,9 +28,7 @@ from scales.model import GPT_Scales, file_data_share
 from scales.tblog_utils import load_tb
 from scales.utils import (
     load_checkpoint,
-    load_checkpoint_state,
     save_checkpoint,
-    save_checkpoint_state,
 )
 
 
@@ -154,75 +150,56 @@ def init_state(
 
     train_args.logging_args.start_logger()
 
-    if load_model_from_path is None:
-        states: Dict[str, Any] = {}
-        model = GPT_Scales(train_args.model_config)
-    else:
-        if train_args.model_config_path or train_args.model_name:
-            warnings.warn(
-                "The configuration yaml in the loaded directory will be used "
-                "`model_config_file` and `model_name` are ignored"
-            )
-        states, model_path = load_checkpoint(fabric, load_model_from_path)
-        config = Config.from_file(model_path)
-        model = GPT_Scales(config)
-        model.load_state_dict(states["model"])
-
+    states: Dict[str, Any] = {}
+    model = GPT_Scales(train_args.model_config)
     lr_details = train_args.lr_scheduler
 
     if lr_details is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
     model = fabric.setup(model)
+    # TODO: how to init model weights correctly
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.max_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
     )
 
-    if train_args.lr_scheduler.torch_scheduler is not None:
-        torch_scheduler = train_args.lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
-    else:
-        torch_scheduler = None
-    if len(states) != 0 and torch_scheduler is not None:
-        torch_scheduler.load_state_dict(states["torch_scheduler"])
+    torch_scheduler = train_args.lr_scheduler.scheduler
 
-    if len(states) != 0:
-        optimizer.load_state_dict(states["optimizer"])
     optimizer = fabric.setup_optimizers(optimizer)
-
-    if len(states) == 0:
-        states["train_steps"] = 0
-        states["train_tokens"] = 0
 
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
-    if save_init_state:
-        save_checkpoint_state(
-            save_state_path=Path(train_args.save_state_path),
-            train_steps=states["train_steps"],
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
-        )
-
-    # load checkpoint state
-    train_steps = 0
-    if train_args.load_state_path is not None:
-        # load the state here
-        train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
-            load_state_path=Path(train_args.load_state_path),
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=train_args.overwrite_state,
-        )
-
-    states["train_steps"] = train_steps
+    states["train_tokens"] = 0
+    states["train_steps"] = 0
     states["model"] = model
     states["optimizer"] = optimizer
     states["torch_scheduler"] = torch_scheduler
+    if save_init_state:
+        save_checkpoint(
+            fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
+        )
+        # save_checkpoint_state(
+        #     save_state_path=Path(train_args.save_state_path),
+        #     train_steps=states["train_steps"],
+        #     model=model,
+        #     optimizer=optimizer,
+        #     scheduler=train_args.lr_scheduler.scheduler,
+        #     overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
+        # )
+
+    # load checkpoint state
+    if train_args.load_state_path is not None:
+        # load the state here
+        _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
+        # train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
+        #     load_state_path=Path(train_args.load_state_path),
+        #     model=model,
+        #     optimizer=optimizer,
+        #     scheduler=train_args.lr_scheduler.scheduler,
+        #     overwrite_checkpoint=train_args.overwrite_state,
+        # )
 
     return states
 
@@ -322,13 +299,13 @@ def train(
                 )
             logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
-            train_args.lr_scheduler.step(
-                steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
-            )
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
+
             states["optimizer"].step()
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
+
+            train_args.lr_scheduler.step(steps=states["train_steps"] + 1, optimizer=states["optimizer"])
             end_time = time.time()
 
             total_batch_time = fabric.all_reduce(torch.tensor(end_time - start_time), reduce_op="mean")
@@ -371,14 +348,16 @@ def train(
         if (
             states["train_steps"] % train_args.save_state_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
-            save_checkpoint_state(
-                save_state_path=Path(str(train_args.save_state_path)),
-                train_steps=states["train_steps"],
-                model=states["model"],
-                optimizer=states["optimizer"],
-                scheduler=states["torch_scheduler"],
-                overwrite_checkpoint=train_args.overwrite_state,
-            )
+            states["torch_scheduler"] = train_args.lr_scheduler.scheduler
+            save_checkpoint(fabric, state=states, checkpoint_dir=Path(str(train_args.save_state_path)))
+            # save_checkpoint_state(
+            #     save_state_path=Path(str(train_args.save_state_path)),
+            #     train_steps=states["train_steps"],
+            #     model=states["model"],
+            #     optimizer=states["optimizer"],
+            #     scheduler=states["torch_scheduler"],
+            #     overwrite_checkpoint=train_args.overwrite_state,
+            # )
             if train_args.save_state_path is not None:
                 result_path = train_args.save_state_path / "result.yaml"
                 with result_path.open(mode="w", encoding="utf-8") as file:

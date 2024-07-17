@@ -71,7 +71,7 @@ def convert_and_evaluate(
     out_dir.mkdir(exist_ok=True, parents=True)
     save_filepath = out_dir / Path("results.json")
 
-    state, _ = load_checkpoint(fabric, checkpoint_dir)
+    state, _ = load_checkpoint(fabric, state=None, checkpoint_dir=checkpoint_dir)
     model = GPT(ConfigWrapper.from_path(checkpoint_dir / "model_config.yaml").config)
     model.load_state_dict(state_dict=state["model"])
     model = fabric.setup(model)
