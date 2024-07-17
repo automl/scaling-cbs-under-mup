@@ -107,36 +107,16 @@ def resolve_train_steps(
     return train_steps
 
 
-def resolve_scheduler_params(
-    max_lr: float,
-    max_train_steps: int,
-    min_lr: float = 0,
-    warmup_fraction: int | None = None,
-    decay_fraction: int | None = None,
-    lr_cooldown: bool = False,
-    torch_scheduler: str | None = None,
-    torch_scheduler_args: dict | None = None,
-) -> LRScheduler:
-    end_warmup_step = int(warmup_fraction * max_train_steps) if warmup_fraction is not None else None
-    end_decay_step = int(decay_fraction * max_train_steps) if decay_fraction is not None else None
-    end_cooldown_step = max_train_steps if lr_cooldown is True else None
-
-    # TODO: write an adapter for all torch.optim.LRScheduler classes
-    if torch_scheduler and torch_scheduler == "CosineAnnealingLR":
-        torch_scheduler_args = {} if torch_scheduler_args is None else torch_scheduler_args
-        torch_scheduler_args["T_max"] = (
-            end_decay_step - end_warmup_step if end_warmup_step is not None else end_decay_step
-        )
-
-    return LRScheduler(
-        max_lr=max_lr,
-        min_lr=min_lr,
-        end_decay_step=end_decay_step,
-        end_warmup_step=end_warmup_step,
-        end_cooldown_step=end_cooldown_step,
-        torch_scheduler=torch_scheduler,
-        torch_scheduler_args=torch_scheduler_args,
-    )
+# def resolve_scheduler_params(
+#     max_lr: float,
+#     max_train_steps: int,
+#     min_lr: float = 0,
+#     warmup_fraction: int | None = None,
+#     cooldown_fraction: int | None = None,
+#     cooldown_type: str = "linear",
+#     torch_scheduler: str | None = None,
+#     torch_scheduler_args: dict | None = None,
+# ) -> LRScheduler:
 
 
 @dataclass
@@ -171,12 +151,12 @@ class TrainConfig(BaseConfig):
     """Model name to load from HF hub."""
 
     # LR scheduler
-    decay_fraction: float | None = None
-    """Fraction of steps in the torch main/decay schedule."""
-    warmup_fraction: int | None = None
+    cooldown_fraction: float | None = None
+    """Fraction of steps to cooldown schedule."""
+    warmup_fraction: float | None = None
     """Fraction of steps in the warmup schedule."""
-    lr_cooldown: bool = False
-    """When cooldown to min_lr is needed, this should be set to true"""
+    cooldown_type: str = "linear"
+    """When cooldown to min_lr is needed, this should be set to true."""
     min_lr: float = 0.0
     """`min_lr` the scheduler can reach."""
     torch_scheduler: str | None = None
@@ -255,13 +235,13 @@ class TrainConfig(BaseConfig):
             devices=self.devices,
         )
 
-        self.lr_scheduler = resolve_scheduler_params(
+        self.lr_scheduler = LRScheduler(
+            max_steps=self.train_steps,
             max_lr=self.max_lr,
-            max_train_steps=self.train_steps,
             min_lr=self.min_lr,
-            warmup_fraction=self.warmup_fraction,
-            decay_fraction=self.decay_fraction,
-            lr_cooldown=self.lr_cooldown,
+            warmup_frac=self.warmup_fraction,
+            cool_down_frac=self.cooldown_fraction,
+            cooldown_type=self.cooldown_type,
             torch_scheduler=self.torch_scheduler,
             torch_scheduler_args=self.torch_scheduler_args,
         )
@@ -321,7 +301,7 @@ class PipelineConfig(BaseConfig):
 
 if __name__ == "__main__":
     conf = TrainConfig(
-        init_lr=0.001,
+        max_lr=0.001,
         micro_batch_size=1,
         block_size=1028,
         weight_decay=0.001,
