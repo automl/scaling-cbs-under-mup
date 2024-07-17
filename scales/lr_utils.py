@@ -7,7 +7,7 @@ from torch.optim.optimizer import Optimizer
 class LRScheduler:
     def __init__(
         self,
-        init_lr: float,
+        max_lr: float,
         min_lr: float = 0,
         end_warmup_step: int | None = None,
         end_decay_step: int | None = None,
@@ -15,7 +15,7 @@ class LRScheduler:
         torch_scheduler: str | None = None,
         torch_scheduler_args: dict | None = None,
     ) -> None:
-        self.init_lr = init_lr
+        self.max_lr = max_lr
         self.min_lr = min_lr
         # TODO: use n_steps instead of additive points here to simplify
         self.end_warmup_step = (end_warmup_step - 1) if isinstance(end_warmup_step, int) else end_warmup_step
@@ -24,9 +24,10 @@ class LRScheduler:
         self.torch_scheduler = torch_scheduler
         self.torch_scheduler_args = torch_scheduler_args
 
-        self._inital_cooldown_lr: float
-        self._cooldown_shift: int = 0
-        self._first_cooldown_step: bool = True
+        if self.end_warmup_step is not None:
+            self.warmup_slope = self.max_lr / (self.end_warmup_step)
+
+        self.cooldown_slope: float | None = None
 
     def _instantiate_lr_scheduler(self, optimizer: Optimizer) -> torch.optim.lr_scheduler.LRScheduler:
         if isinstance(self.torch_scheduler, str):
@@ -39,43 +40,38 @@ class LRScheduler:
             lr = param_group["lr"]
         return lr
 
-    def _edit_lr(self, optimizer: Optimizer, new_lr: float) -> None:
+    def _edit_lr_add(self, optimizer: Optimizer, scale: float) -> None:
         for param_group in optimizer.param_groups:
-            param_group["lr"] = new_lr
+            param_group["lr"] += scale
 
-    def _get_cooldown_shift(self) -> int:
-        if self.end_decay_step:
-            return self.end_decay_step
-        if self.end_warmup_step and self.end_decay_step is None:
-            return self.end_warmup_step
-        return 0
+    def _edit_lr_mult(self, optimizer: Optimizer, scale: float) -> None:
+        for param_group in optimizer.param_groups:
+            param_group["lr"] *= scale
 
     def step(
-        self, steps: int, optimizer: Optimizer, scheduler: torch.optim.lr_scheduler.LRScheduler | None = None
+        self,
+        steps: int,
+        optimizer: Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     ) -> None:
         # Warmup
         if self.end_warmup_step is not None and steps <= self.end_warmup_step:
-            new_lr = self.init_lr * steps / (self.end_warmup_step)
-            self._edit_lr(optimizer, new_lr)
+            if steps == 0:
+                self._edit_lr_mult(optimizer, 0)
+            else:
+                self._edit_lr_add(optimizer, self.warmup_slope)
         # Main
         elif steps != 0 and (self.end_decay_step is None or (self.end_decay_step and steps <= self.end_decay_step)):
             if scheduler is not None:
                 scheduler.step()
                 if self._get_lr_from_optim(optimizer=optimizer) < self.min_lr:
-                    self._edit_lr(optimizer, self.min_lr)
+                    self._edit_lr_mult(optimizer, 1)
             else:
                 return
         # Cooldown
-        elif (
-            self.end_cooldown_step
-            and steps <= self.end_cooldown_step
-            and self.end_cooldown_step != self._get_cooldown_shift()
-        ):
-            if self._first_cooldown_step is True:
-                self._inital_cooldown_lr = self._get_lr_from_optim(optimizer)
-                self._cooldown_shift = self._get_cooldown_shift()
-                self._first_cooldown_step = False
-            new_lr = self._inital_cooldown_lr - (
-                (self._inital_cooldown_lr - self.min_lr) * (steps - self._cooldown_shift)
-            ) / (self.end_cooldown_step - self._cooldown_shift)
-            self._edit_lr(optimizer, new_lr)
+        elif self.end_cooldown_step is not None and steps <= self.end_cooldown_step:
+            if self.cooldown_slope is None:
+                self.cooldown_slope = (self.min_lr - self._get_lr_from_optim(optimizer)) / (
+                    self.end_cooldown_step - steps + 1
+                )
+            self._edit_lr_add(optimizer, self.cooldown_slope)
