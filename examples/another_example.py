@@ -2,6 +2,7 @@ from pathlib import Path
 from pprint import pprint
 
 import lightning as L
+from litgpt.config import Config
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import PipelineConfig, TrainConfig
@@ -16,18 +17,19 @@ if __name__ == "__main__":
     else:
         # Define your own PipelineConfig
         train_conf = TrainConfig(
-            init_lr=0.001,
+            max_lr=0.01,
             micro_batch_size=1,
-            block_size=1024,
+            block_size=128,
             weight_decay=0.001,
             max_val_steps=2,
-            n_warmup_steps=None,
-            n_main_steps=None,
-            n_cooldown_steps=None,
+            warmup_fraction=0.2,
+            decay_fraction=0.8,
+            lr_cooldown=True,
             torch_scheduler="CosineAnnealingLR",
-            torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
-            model_config_path=output_dir.parent / "model.yaml",
-            tokens_per_param=20,
+            torch_scheduler_args={"eta_min": 5e-4},
+            model_config=Config(block_size=128, vocab_size=50257, n_embd=32, n_layer=3, n_head=2),
+            # tokens_per_param=20,
+            max_train_steps=100,
             tracked_metrics={
                 "train_loss": 1,
                 "validation_loss": 5,
