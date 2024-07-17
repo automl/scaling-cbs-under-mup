@@ -35,10 +35,13 @@ class LRScheduler:
             return scheduler_cls(optimizer, **self.torch_scheduler_args)
         raise ValueError("The `lr_scheduler` argument should be a string")
 
-    def _get_lr_from_optim(self, optimizer: Optimizer) -> float:
+    def _get_min_lr_from_optim(self, optimizer: Optimizer) -> float:
+        min_lr = 1
         for param_group in optimizer.param_groups:
             lr = param_group["lr"]
-        return lr
+            if lr < min_lr:
+                min_lr = lr
+        return min_lr
 
     def _edit_lr_add(self, optimizer: Optimizer, scale: float) -> None:
         for param_group in optimizer.param_groups:
@@ -64,14 +67,14 @@ class LRScheduler:
         elif steps != 0 and (self.end_decay_step is None or (self.end_decay_step and steps <= self.end_decay_step)):
             if scheduler is not None:
                 scheduler.step()
-                if self._get_lr_from_optim(optimizer=optimizer) < self.min_lr:
+                if self._get_min_lr_from_optim(optimizer=optimizer) < self.min_lr:
                     self._edit_lr_mult(optimizer, 1)
             else:
                 return
         # Cooldown
         elif self.end_cooldown_step is not None and steps <= self.end_cooldown_step:
             if self.cooldown_slope is None:
-                self.cooldown_slope = (self.min_lr - self._get_lr_from_optim(optimizer)) / (
+                self.cooldown_slope = (self.min_lr - self._get_min_lr_from_optim(optimizer)) / (
                     self.end_cooldown_step - steps + 1
                 )
             self._edit_lr_add(optimizer, self.cooldown_slope)
