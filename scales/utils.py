@@ -108,6 +108,15 @@ def gradient_l2_norm_per_layer(model: nn.Module, global_step: int) -> dict:
     for name, param in model.named_parameters():
         if "transformer.h" in name and param.grad is not None and param.requires_grad:
             layer_id = name.split(".transformer.h.")[-1].split(".")[0]  # extract the layer ID
-            layer_grad_norms[layer_id].append(param.grad.norm(2).item() ** 2)
+            layer_grad_norms[layer_id].append(param.grad.detach().norm(2).item() ** 2)
     # calculating norm for each layer by summing the square of each parameter's gradient
     return {k: np.sum(v) ** 0.5 for k, v in layer_grad_norms.items()}
+
+
+def weight_spectra(model: nn.Module) -> dict:
+    singular_val_per_layer = {}
+    for name, mod in model.named_modules():
+        if isinstance(mod, torch.nn.Linear):
+            singular_vals = torch.linalg.svdvals(mod.weight.data).detach()
+            singular_val_per_layer[name] = singular_vals
+    return singular_val_per_layer

@@ -12,7 +12,7 @@ import torch.nn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm
+from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm, weight_spectra
 
 
 def should_log(func: Callable) -> Callable:
@@ -154,6 +154,12 @@ class LoggingArgs:
         # log to TensorBoard as separate plots
         for layer, norm in layer_grad_norms.items():
             self.writer.add_scalar(tag=f"Per-layer Gradient Norm/layer{layer}", scalar_value=norm, global_step=step)
+
+    @should_log
+    def weight_spectra_max(self, model: torch.nn.Module, step: int) -> None:
+        sv_per_layer = weight_spectra(model)
+        for name, sing_vals in sv_per_layer.items():
+            self.writer.add_scalar(tag=f"Max SV/{name}", scalar_value=torch.max(sing_vals), global_step=step)
 
     @should_log
     def train_loss(self, loss: float, step: int) -> None:
