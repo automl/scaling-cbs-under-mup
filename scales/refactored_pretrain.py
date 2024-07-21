@@ -283,6 +283,12 @@ def train(
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
+
+            if getattr(train_args, "z_loss_eps", None) is not None:
+                # implementation from
+                # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
+                z_loss = train_args.z_loss_eps * torch.square(torch.logsumexp(logits, dim=-1)).mean()
+                loss += z_loss
             fabric.backward(loss / accumulation_iters)
             device_running_loss += loss.item() / accumulation_iters
 

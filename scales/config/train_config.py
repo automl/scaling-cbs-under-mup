@@ -176,6 +176,10 @@ class TrainConfig(BaseConfig):
     clip_max_val: float | None = None
     validate_every: int = 5
     """Number of steps after which to validate the model."""
+    z_loss_eps: float | None = None
+    "Epsilon value for Z loss"
+    independent_wd: bool = False
+    "Whether to use independent weight decay during AdamW"
 
     # logging details
     tracked_metrics: dict[str, int] | None = None
@@ -253,6 +257,9 @@ class TrainConfig(BaseConfig):
             global_log_step=self.global_log_step,
             log_dir=None,
         )
+
+        if self.independent_wd:
+            self.weight_decay = self.weight_decay / self.lr_scheduler.max_lr
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
