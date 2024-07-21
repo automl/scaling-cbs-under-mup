@@ -307,6 +307,7 @@ def train(
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
             logger.weight_spectra_max(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
 
             states["optimizer"].step()
             states["optimizer"].zero_grad()

@@ -66,6 +66,7 @@ class LoggingArgs:
             self.max_attn_logit = None
             self.max_attn_logits_per_layer: list[float] = []
             self.total_logits_max = None
+            self.prev_weight_spectra: None | dict = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
         if self.suppress_all_logs:
@@ -160,6 +161,24 @@ class LoggingArgs:
         sv_per_layer = weight_spectra(model)
         for name, sing_vals in sv_per_layer.items():
             self.writer.add_scalar(tag=f"Max SV/{name}", scalar_value=torch.max(sing_vals), global_step=step)
+
+    @should_log
+    def weight_spectra_diff(self, model: torch.nn.Module, step: int) -> None:
+        if self.prev_weight_spectra is None:
+            self.prev_weight_spectra = weight_spectra(model)
+        else:
+            sv_per_layer = weight_spectra(model)
+            for name, sing_vals in sv_per_layer.items():
+                self.writer.add_scalar(
+                    tag=f"L2 diff SV/{name}",
+                    scalar_value=torch.dist(sing_vals, self.prev_weight_spectra[name], p=2),
+                    global_step=step,
+                )
+            self.prev_weight_spectra = sv_per_layer
+
+    @should_log
+    def z_loss(self, loss: float, step: int) -> None:
+        self.writer.add_scalar(tag="Z Loss", scalar_value=loss, global_step=step)
 
     @should_log
     def train_loss(self, loss: float, step: int) -> None:
