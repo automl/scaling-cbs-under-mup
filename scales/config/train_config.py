@@ -258,8 +258,11 @@ class TrainConfig(BaseConfig):
             log_dir=None,
         )
 
+    @property
+    def true_weight_decay(self) -> float:
         if self.independent_wd:
-            self.weight_decay = self.weight_decay / self.lr_scheduler.max_lr
+            return self.weight_decay / self.lr_scheduler.max_lr
+        return self.weight_decay
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:

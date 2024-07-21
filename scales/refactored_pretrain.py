@@ -161,7 +161,7 @@ def init_state(
     # TODO: how to init model weights correctly
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
     )
 
     torch_scheduler = train_args.lr_scheduler.scheduler
