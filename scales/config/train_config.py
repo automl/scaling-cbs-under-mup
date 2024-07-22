@@ -265,7 +265,9 @@ class TrainConfig(BaseConfig):
         return self.weight_decay
 
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> TrainConfig:
+        if yaml_hook is not None:
+            yaml_config = yaml_hook(yaml_config)
         try:
             yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
         except TypeError:
@@ -299,9 +301,9 @@ class PipelineConfig(BaseConfig):
         self.data_config.block_size = self.train_config.block_size
 
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> PipelineConfig:
         yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
-        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
+        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"], yaml_hook)
         if yaml_config.get("eval_config"):
             yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
         else:
