@@ -12,7 +12,11 @@ import torch.nn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm, weight_spectra
+from scales.utils import (
+    gradient_l2_norm_per_layer,
+    total_gradient_l2_norm,
+    weight_spectra,
+)
 
 
 def should_log(func: Callable) -> Callable:
@@ -89,9 +93,7 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Learning Rate", scalar_value=optimizer.param_groups[-1]["lr"], global_step=step)
 
     @should_log
-    def output_logits_max(
-        self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
-    ) -> None:
+    def output_logits_max(self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
         logits_max = logits.max().item()
         if self.total_logits_max is not None:
             self.total_logits_max = max(self.total_logits_max, logits_max)
@@ -142,6 +144,30 @@ class LoggingArgs:
             self.max_attn_logit = fabric.all_reduce(self.max_attn_logit, reduce_op="max")
             self.writer.add_scalar(tag="Max Attention Logits/All", scalar_value=self.max_attn_logit, global_step=step)
             self.max_attn_logit = None
+
+    @should_log
+    def optimizer_stats(self, step: int, optimizer: Optimizer):
+        if isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
+            variance_l1 = 0
+            momentum_l1 = 0
+            variance_max = 0
+            for group in optimizer.param_groups:
+                for param in group["params"]:
+                    if param.grad is not None:
+                        exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
+                        exp_avg = optimizer.state[param]["exp_avg"]
+                        variance_l1 += torch.norm(exp_avg_sq, p=1).item()
+                        momentum_l1 += torch.norm(exp_avg, p=1).item()
+                        variance_max = max(
+                            variance_max,
+                            abs(exp_avg_sq.max().item()),
+                            abs(exp_avg_sq.min().item()),
+                        )
+            self.writer.add_scalar(tag="Optimizer/Variance_l1", scalar_value=variance_l1, global_step=step)
+            self.writer.add_scalar(tag="Optimizer/Momentum_l1", scalar_value=momentum_l1, global_step=step)
+            self.writer.add_scalar(tag="Optimizer/Variance_max", scalar_value=variance_max, global_step=step)
+        else:
+            warn("Logging optimizer stats only works when using `Adam` or `AdamW` type optimizers")
 
     @should_log
     def total_gradient_norm(self, model: torch.nn.Module, step: int) -> None:

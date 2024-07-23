@@ -1,12 +1,5 @@
 """This is a custom implementation for pretraining language models with litgpt and a simple version for getting
 started.
-
-Current missing features:
-
-- No precision editing from fabric
-- No logger (only to terminal)
-- No grad accumulation
-
 """
 
 from __future__ import annotations
@@ -26,10 +19,7 @@ from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
 from scales.model import GPT_Scales, file_data_share
 from scales.tblog_utils import load_tb
-from scales.utils import (
-    load_checkpoint,
-    save_checkpoint,
-)
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -265,7 +255,6 @@ def train(
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
-                accumulation_iters=accumulation_iters,
                 last=last_step,
             )
             logger.max_attention_logits_per_layer(
@@ -310,6 +299,7 @@ def train(
             logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
 
             states["optimizer"].step()
+            logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
 
