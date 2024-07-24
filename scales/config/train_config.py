@@ -27,6 +27,9 @@ def resolve_model_config(
     Make sure this function always returns an initialized Config no matter what the train_config args are
 
     """
+    if model_checkpoint_dir is not None:
+        model_checkpoint_dir = Path(model_checkpoint_dir)
+
     model_config_path = (
         model_checkpoint_dir / "model_config.yaml"
         if model_config_path is None and model_checkpoint_dir is not None and model_checkpoint_dir.is_dir()
