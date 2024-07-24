@@ -41,7 +41,8 @@ class LRScheduler:
         self.torch_scheduler_args = torch_scheduler_args
         self.cooldown_type = cooldown_type
 
-        self.warmup_slope = self.max_lr / self.end_warmup_step
+        if self.end_warmup_step:
+            self.warmup_slope = self.max_lr / self.end_warmup_step
 
         self.cooldown_slope: float | None = None
         self.min_lr_at_cooldown_start: float | None = None

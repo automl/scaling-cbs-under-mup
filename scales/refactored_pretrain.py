@@ -1,6 +1,5 @@
 """This is a custom implementation for pretraining language models with litgpt and a simple version for getting
-started.
-"""
+started."""
 
 from __future__ import annotations
 
@@ -13,6 +12,7 @@ import torch
 import torch.nn as nn
 import yaml
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
+from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
@@ -119,7 +119,6 @@ def init_state(
     train_args: TrainConfig,
     out_dir: Path,
     save_init_state: bool = True,
-    load_model_from_path: str | Path | None = None,
 ) -> dict:
     """Initialize the state for training.
 
@@ -129,7 +128,6 @@ def init_state(
         out_dir: The output directory where the logs and checkpoints will be saved
             If `save_state_path` is not provided, the state checkpoints will be saved here
         save_init_state: Whether to save the initial state, especially the initialization weights
-        load_model_from_path: The path to load the model from (TODO: write what is different here)
 
     Returns:
         dict: The state for training
@@ -140,56 +138,49 @@ def init_state(
 
     train_args.logging_args.start_logger()
 
-    states: Dict[str, Any] = {}
-    model = GPT_Scales(train_args.model_config)
-    lr_details = train_args.lr_scheduler
+    states: Dict[str, Any] = {"train_tokens": 0, "train_steps": 0, "torch_scheduler": train_args.lr_scheduler.scheduler}
+    states["model"] = GPT_Scales(train_args.model_config, mup=train_args.mup_base_shape_path is not None)
 
-    if lr_details is None:
+    if train_args.load_state_path and train_args.mup_base_shape_path:
+        set_base_shapes(states["model"], train_args.mup_base_shape_path, rescale_params=False)
+    elif train_args.mup_base_shape_path:
+        set_base_shapes(states["model"], train_args.mup_base_shape_path)
+
+    if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
-    model = fabric.setup(model)
     # TODO: how to init model weights correctly
+    if train_args.mup_base_shape_path:
+        fabric.print("Using MuP Optimizer")
+        states["optimizer"] = MuAdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(0.9, 0.95),
+        )
+    else:
+        states["optimizer"] = torch.optim.AdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(0.9, 0.95),
+        )
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
-    )
-
-    torch_scheduler = train_args.lr_scheduler.scheduler
-
-    optimizer = fabric.setup_optimizers(optimizer)
+    states["model"] = fabric.setup_module(states["model"])
+    states["optimizer"] = fabric.setup_optimizers(states["optimizer"])
 
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
-    states["train_tokens"] = 0
-    states["train_steps"] = 0
-    states["model"] = model
-    states["optimizer"] = optimizer
-    states["torch_scheduler"] = torch_scheduler
     if save_init_state:
         save_checkpoint(
             fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
         )
-        # save_checkpoint_state(
-        #     save_state_path=Path(train_args.save_state_path),
-        #     train_steps=states["train_steps"],
-        #     model=model,
-        #     optimizer=optimizer,
-        #     scheduler=train_args.lr_scheduler.scheduler,
-        #     overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
-        # )
 
     # load checkpoint state
     if train_args.load_state_path is not None:
         # load the state here
         _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
-        # train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
-        #     load_state_path=Path(train_args.load_state_path),
-        #     model=model,
-        #     optimizer=optimizer,
-        #     scheduler=train_args.lr_scheduler.scheduler,
-        #     overwrite_checkpoint=train_args.overwrite_state,
-        # )
 
     return states
 

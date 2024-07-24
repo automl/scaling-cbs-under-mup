@@ -146,7 +146,7 @@ class LoggingArgs:
             self.max_attn_logit = None
 
     @should_log
-    def optimizer_stats(self, step: int, optimizer: Optimizer):
+    def optimizer_stats(self, step: int, optimizer: Optimizer) -> None:
         if isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
             variance_l1 = 0
             momentum_l1 = 0
