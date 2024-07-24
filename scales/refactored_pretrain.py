@@ -119,7 +119,6 @@ def init_state(
     train_args: TrainConfig,
     out_dir: Path,
     save_init_state: bool = True,
-    load_model_from_path: str | Path | None = None,
 ) -> dict:
     """Initialize the state for training.
 
@@ -129,7 +128,6 @@ def init_state(
         out_dir: The output directory where the logs and checkpoints will be saved
             If `save_state_path` is not provided, the state checkpoints will be saved here
         save_init_state: Whether to save the initial state, especially the initialization weights
-        load_model_from_path: The path to load the model from (TODO: write what is different here)
 
     Returns:
         dict: The state for training

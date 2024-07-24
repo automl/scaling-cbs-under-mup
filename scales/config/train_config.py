@@ -19,9 +19,20 @@ from scales.lr_utils import LRScheduler
 def resolve_model_config(
     model_config: Config | None = None,
     model_config_path: Path | None = None,
+    model_checkpoint_dir: Path | None = None,
     model_name: str | None = None,
 ) -> Config:
-    """4 methods of loading a model configuration..."""
+    """4 methods of loading a model configuration...
+
+    Make sure this function always returns an initialized Config no matter what the train_config args are
+
+    """
+    model_config_path = (
+        model_checkpoint_dir / "model_config.yaml"
+        if model_config_path is None and model_checkpoint_dir is not None and model_checkpoint_dir.is_dir()
+        else model_config_path
+    )
+
     if model_config is None:
         # Setting up model configuration
         if model_config_path and model_name is None:
@@ -29,9 +40,9 @@ def resolve_model_config(
         elif model_name and model_config_path is None:
             config = Config.from_name(model_name)
         elif model_config_path and model_name:
-            raise ValueError("Only one of `model_name` or `model_config` can be set.")
+            raise ValueError("Only one of `model_name` or `model_config_path` can be set.")
         else:
-            raise ValueError("Please specify `model_name` or `model_config_file`")
+            raise ValueError("Please specify `model_name` or `model_config_path`")
     else:
         return model_config
 
@@ -95,20 +106,24 @@ def resolve_train_steps(
     return train_steps
 
 
-# def resolve_scheduler_params(
-#     max_lr: float,
-#     max_train_steps: int,
-#     min_lr: float = 0,
-#     warmup_fraction: int | None = None,
-#     cooldown_fraction: int | None = None,
-#     cooldown_type: str = "linear",
-#     torch_scheduler: str | None = None,
-#     torch_scheduler_args: dict | None = None,
-# ) -> LRScheduler:
-
-
 @dataclass
 class TrainConfig(BaseConfig):
+    """Configuration to specify a recipie for the model training. This class initializes all the necessary values used
+    during the training based on the initialization arguments.
+
+    Note:
+        This object initializes a Config object which is an input to the GPT model.
+        We never initialize or load model weights inside TrainConfig
+    Note:
+        The arguments that are not appended to the self.ignore_list are not allowed to change during the lifecycle
+        of this object. This is because, those arguments are written into the yaml files when the config is saved,
+        and loaded using those exact values again. Check true_weight_decay attribute for an example.
+    Note:
+        Avoid putting paths inside config objects as they are not reliable, and require to be reset for
+         every training experiment.
+
+    """
+
     max_lr: float
     """The maximum Learning Rate."""
     micro_batch_size: int
@@ -205,8 +220,10 @@ class TrainConfig(BaseConfig):
         super().__post_init__()
         self.save_state_every = self.validate_every if self.save_state_every is None else self.save_state_every
 
-        self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
-        self.model_config = resolve_model_config(self.model_config, self.model_config_path, self.model_name)
+        self.ignore_fields.extend(["model_config_path", "model_name"])
+        self.model_config = resolve_model_config(
+            self.model_config, self.model_config_path, self.load_state_path, self.model_name
+        )
         # override model block_size
         self.model_config.block_size = self.block_size
         self.model_config = ConfigWrapper.from_config(self.model_config)
