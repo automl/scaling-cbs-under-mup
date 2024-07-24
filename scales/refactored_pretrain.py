@@ -4,7 +4,6 @@ started."""
 from __future__ import annotations
 
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict
 
@@ -12,7 +11,6 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.config import Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
 from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
@@ -142,59 +140,49 @@ def init_state(
 
     train_args.logging_args.start_logger()
 
-    states: Dict[str, Any] = {}
-    if load_model_from_path is None:
-        model = GPT_Scales(train_args.model_config, mup=train_args.load_base_shape_path is not None)
-        if train_args.load_base_shape_path:
-            set_base_shapes(model, train_args.load_base_shape_path)
-    else:
-        if train_args.model_config_path or train_args.model_name:
-            warnings.warn(
-                "The configuration yaml in the loaded directory will be used "
-                "`model_config_file` and `model_name` are ignored"
-            )
-        states, model_path = load_checkpoint(fabric, states, load_model_from_path)
-        config = Config.from_file(model_path)
-        model = GPT_Scales(config, mup=train_args.load_base_shape_path is not None)
-        if train_args.load_base_shape_path:
-            set_base_shapes(model, train_args.load_base_shape_path, rescale_params=False)
-        train_args.lr_scheduler = states["lr_scheduler"]
-        model.load_state_dict(states["model"])
+    states: Dict[str, Any] = {"train_tokens": 0, "train_steps": 0, "torch_scheduler": train_args.lr_scheduler.scheduler}
+    states["model"] = GPT_Scales(train_args.model_config, mup=train_args.mup_base_shape_path is not None)
 
-    lr_details = train_args.lr_scheduler
+    if train_args.load_state_path and train_args.mup_base_shape_path:
+        set_base_shapes(states["model"], train_args.mup_base_shape_path, rescale_params=False)
+    elif train_args.mup_base_shape_path:
+        set_base_shapes(states["model"], train_args.mup_base_shape_path)
 
-    if lr_details is None:
+    if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
-    if train_args.load_base_shape_path:
-        fabric.print("Using MuP Optimizer")
-        optimizer = MuAdamW(
-            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
-        )
-        model = fabric.setup(model)
     # TODO: how to init model weights correctly
-    else:
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
+    if train_args.mup_base_shape_path:
+        fabric.print("Using MuP Optimizer")
+        states["optimizer"] = MuAdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(0.9, 0.95),
         )
-        model = fabric.setup(model)
+    else:
+        states["optimizer"] = torch.optim.AdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(0.9, 0.95),
+        )
 
-    torch_scheduler = train_args.lr_scheduler.scheduler
-
-    optimizer = fabric.setup_optimizers(optimizer)
+    states["model"] = fabric.setup_module(states["model"])
+    states["optimizer"] = fabric.setup_optimizers(states["optimizer"])
 
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
-    states["train_tokens"] = 0
-    states["train_steps"] = 0
-    states["model"] = model
-    states["optimizer"] = optimizer
-    states["torch_scheduler"] = torch_scheduler
     if save_init_state:
         save_checkpoint(
             fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
         )
+
+    # load checkpoint state
+    if train_args.load_state_path is not None:
+        # load the state here
+        _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
 
     return states
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from warnings import warn
 
 from litgpt.config import Config
 from litgpt.model import GPT
@@ -19,31 +18,20 @@ from scales.lr_utils import LRScheduler
 
 def resolve_model_config(
     model_config: Config | None = None,
-    checkpoint_dir: Path | None = None,
     model_config_path: Path | None = None,
     model_name: str | None = None,
 ) -> Config:
     """4 methods of loading a model configuration..."""
     if model_config is None:
-        if checkpoint_dir is None:
-            # Setting up model configuration
-            if model_config_path and model_name is None:
-                config = Config.from_file(model_config_path)
-            elif model_name and model_config_path is None:
-                config = Config.from_name(model_name)
-            elif model_config_path and model_name:
-                raise ValueError("Only one of `model_name` or `model_config` can be set.")
-            else:
-                raise ValueError("Please specify `model_name` or `model_config_file`")
-
+        # Setting up model configuration
+        if model_config_path and model_name is None:
+            config = Config.from_file(model_config_path)
+        elif model_name and model_config_path is None:
+            config = Config.from_name(model_name)
+        elif model_config_path and model_name:
+            raise ValueError("Only one of `model_name` or `model_config` can be set.")
         else:
-            if model_config_path or model_name:
-                warn(
-                    "The configuration yaml in the loaded directory will be used "
-                    "`model_config_file` and `model_name` are ignored"
-                )
-            model_path = Path(checkpoint_dir / "model_config.yaml")
-            config = Config.from_file(model_path)
+            raise ValueError("Please specify `model_name` or `model_config_file`")
     else:
         return model_config
 
@@ -141,12 +129,7 @@ class TrainConfig(BaseConfig):
     """Config object for model config."""
     model_config_path: Path | None = None
     """Config Path for the Config object, ignored if model_config provided."""
-    model_checkpoint_dir: Path | None = None
-    """Checkpoint directory for a trained model, ignored if model_config provided.
 
-    NOTE: not used for loading pre-trained models. only for loading Config object
-
-    """
     model_name: str | None = None
     """Model name to load from HF hub."""
 
@@ -182,7 +165,7 @@ class TrainConfig(BaseConfig):
     "Whether to use independent weight decay during AdamW"
 
     # MuParam width
-    load_base_shape_path: str | Path | None = None
+    mup_base_shape_path: str | Path | None = None
     """The path of the base model shape, needs to be stored before running mup."""
 
     # logging details
@@ -223,9 +206,7 @@ class TrainConfig(BaseConfig):
         self.save_state_every = self.validate_every if self.save_state_every is None else self.save_state_every
 
         self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
-        self.model_config = resolve_model_config(
-            self.model_config, self.model_checkpoint_dir, self.model_config_path, self.model_name
-        )
+        self.model_config = resolve_model_config(self.model_config, self.model_config_path, self.model_name)
         # override model block_size
         self.model_config.block_size = self.block_size
         self.model_config = ConfigWrapper.from_config(self.model_config)

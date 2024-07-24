@@ -14,12 +14,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parser for MuP training")
     parser.add_argument("--width", type=int, default=64, help="width of the GPT model")
     parser.add_argument(
-        "--accumulation_steps", type=int, default=1, help="Accumulation iterations for effective batch size"
+        "--accumulation_iters", type=int, default=1, help="Accumulation iterations for effective batch size"
     )
     parser.add_argument("--micro_batch_size", type=int, default=8, help="The micro batch size")
     args = parser.parse_args()
 
-    output_dir = Path(__file__).parent / f"output/width{args.width}"
+    output_dir = Path(__file__).parent / f"output/mup_width{args.width}"
 
     train_conf = TrainConfig(
         max_lr=0.01,
@@ -40,8 +40,8 @@ if __name__ == "__main__":
             "max_attention_logits_all": 5,
             "optimizer_stats": 1,
         },
-        load_base_shape_path="width32.bsh",
-        max_train_steps=100,
+        mup_base_shape_path="width32.bsh",
+        max_train_steps=10,
     )
 
     data_handler = DataHandler(
