@@ -142,3 +142,4 @@ dmypy.json
 
 # yaml files
 *.yaml
+*.csv

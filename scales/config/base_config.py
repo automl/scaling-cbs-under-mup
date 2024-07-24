@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Callable
 
 import yaml
 
@@ -96,10 +96,10 @@ class BaseConfig:
             return {}
 
     @classmethod
-    def from_yaml(cls: type[T], yaml_config: dict[str, Any]) -> T:
+    def from_yaml(cls: type[T], yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> T:
         return cls(**yaml_config)
 
     @classmethod
-    def from_path(cls: type[T], path: Path) -> T:
+    def from_path(cls: type[T], path: Path, yaml_hook: Callable | None = None) -> T:
         yaml_config = cls.load_yaml(output_dir=path)
-        return cls.from_yaml(yaml_config)
+        return cls.from_yaml(yaml_config, yaml_hook)

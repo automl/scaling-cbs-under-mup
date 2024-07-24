@@ -25,15 +25,14 @@ if __name__ == "__main__":
     else:
         # Define your own PipelineConfig
         train_conf = TrainConfig(
-            init_lr=0.001,
+            max_lr=0.01,
             micro_batch_size=args.micro_batch_size,
-            block_size=1024,
+            block_size=128,
             weight_decay=0.001,
             max_val_steps=2,
             accumulation_iters=args.accumulation_iters,
-            n_warmup_steps=None,
-            n_main_steps=None,
-            n_cooldown_steps=None,
+            warmup_fraction=0.2,
+            cooldown_fraction=0.2,
             torch_scheduler="CosineAnnealingLR",
             torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
             model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=args.width),
@@ -47,6 +46,7 @@ if __name__ == "__main__":
                 "gradient_norm_per_layer": 20,
                 "max_attention_logits_per_layer": 5,
                 "max_attention_logits_all": 5,
+                "optimizer_stats": 1,
             },
             max_train_steps=100,
         )

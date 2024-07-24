@@ -19,6 +19,7 @@ mup = "^1.0"
 
 #litgpt = {path = "../litgpt", extras = ["all"], develop = true}
 #lm_eval = {path = "../lm-evaluation-harness", develop = true}
+tbparse = "^0.0.8"
 
 
 

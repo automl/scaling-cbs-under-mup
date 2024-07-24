@@ -22,16 +22,11 @@ if __name__ == "__main__":
     output_dir = Path(__file__).parent / f"output/width{args.width}"
 
     train_conf = TrainConfig(
-        init_lr=0.001,
+        max_lr=0.01,
         micro_batch_size=args.micro_batch_size,
         block_size=1024,
         weight_decay=0,
         max_val_steps=2,
-        n_warmup_steps=None,
-        n_main_steps=None,
-        n_cooldown_steps=None,
-        torch_scheduler="CosineAnnealingLR",
-        torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
         model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=args.width),
         tracked_metrics={
             "train_loss": 1,
@@ -43,6 +38,7 @@ if __name__ == "__main__":
             "gradient_norm_per_layer": 20,
             "max_attention_logits_per_layer": 5,
             "max_attention_logits_all": 5,
+            "optimizer_stats": 1,
         },
         load_base_shape_path="width32.bsh",
         max_train_steps=100,

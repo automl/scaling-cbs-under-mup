@@ -61,7 +61,7 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
 
         attn_bias = torch.zeros(L, S, dtype=q.dtype)
         if mask is None:
-            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            temp_mask = torch.ones(L, S, dtype=torch.bool, device=q.device).tril(diagonal=0)
             attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
             attn_bias.to(q.dtype)
 

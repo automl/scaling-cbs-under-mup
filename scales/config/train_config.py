@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from warnings import warn
 
 from litgpt.config import Config
 from litgpt.model import GPT
 from litgpt.utils import num_parameters, parse_devices
 
-from scales.args import LoggingArgs
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
+from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
 
 
@@ -107,48 +107,22 @@ def resolve_train_steps(
     return train_steps
 
 
-def resolve_scheduler_params(
-    init_lr: float,
-    max_train_steps: int,
-    min_lr: float = 0,
-    warmup_steps: int | None = None,
-    main_steps: int | None = None,
-    cooldown_steps: int | None = None,
-    torch_scheduler: str | None = None,
-    torch_scheduler_args: dict | None = None,
-) -> LRScheduler:
-    warmup_steps = 0 if warmup_steps is None else warmup_steps
-    cooldown_steps = 0 if cooldown_steps is None else cooldown_steps
-    main_steps = max_train_steps - warmup_steps - cooldown_steps if main_steps is None else main_steps
-
-    assert (
-        warmup_steps + cooldown_steps + main_steps == max_train_steps
-    ), f"LR args doesn't match max_train_steps = {max_train_steps} != {warmup_steps} + {cooldown_steps} + {main_steps}"
-
-    end_warmup_step = warmup_steps
-    end_decay_step = warmup_steps + main_steps
-    end_cooldown_step = warmup_steps + main_steps + cooldown_steps
-
-    # TODO: write an adapter for all torch.optim.LRScheduler classes
-    if torch_scheduler and torch_scheduler == "CosineAnnealingLR":
-        torch_scheduler_args = {} if torch_scheduler_args is None else torch_scheduler_args
-        torch_scheduler_args["T_max"] = main_steps
-
-    return LRScheduler(
-        init_lr=init_lr,
-        min_lr=min_lr,
-        end_decay_step=end_decay_step,
-        end_warmup_step=end_warmup_step,
-        end_cooldown_step=end_cooldown_step,
-        torch_scheduler=torch_scheduler,
-        torch_scheduler_args=torch_scheduler_args,
-    )
+# def resolve_scheduler_params(
+#     max_lr: float,
+#     max_train_steps: int,
+#     min_lr: float = 0,
+#     warmup_fraction: int | None = None,
+#     cooldown_fraction: int | None = None,
+#     cooldown_type: str = "linear",
+#     torch_scheduler: str | None = None,
+#     torch_scheduler_args: dict | None = None,
+# ) -> LRScheduler:
 
 
 @dataclass
 class TrainConfig(BaseConfig):
-    init_lr: float
-    """Initial Learning Rate."""
+    max_lr: float
+    """The maximum Learning Rate."""
     micro_batch_size: int
     """The batch per iteration."""
     block_size: int
@@ -177,13 +151,13 @@ class TrainConfig(BaseConfig):
     """Model name to load from HF hub."""
 
     # LR scheduler
-    n_main_steps: int | None = None
-    """Number of steps in the torch main/decay schedule."""
-    n_warmup_steps: int | None = None
-    """Number of steps in the warmup schedule."""
-    n_cooldown_steps: int | None = None
-    """Number of steps in the cooldown schedule."""
-    min_lr: float = 0
+    cooldown_fraction: float | None = None
+    """Fraction of steps to cooldown schedule."""
+    warmup_fraction: float | None = None
+    """Fraction of steps in the warmup schedule."""
+    cooldown_type: str = "linear"
+    """When cooldown to min_lr is needed, this should be set to true."""
+    min_lr: float = 0.0
     """`min_lr` the scheduler can reach."""
     torch_scheduler: str | None = None
     """Torch type scheduler defined in a string."""
@@ -202,6 +176,10 @@ class TrainConfig(BaseConfig):
     clip_max_val: float | None = None
     validate_every: int = 5
     """Number of steps after which to validate the model."""
+    z_loss_eps: float | None = None
+    "Epsilon value for Z loss"
+    independent_wd: bool = False
+    "Whether to use independent weight decay during AdamW"
 
     # MuParam width
     load_base_shape_path: str | Path | None = None
@@ -265,13 +243,13 @@ class TrainConfig(BaseConfig):
             devices=self.devices,
         )
 
-        self.lr_scheduler = resolve_scheduler_params(
-            init_lr=self.init_lr,
-            max_train_steps=self.train_steps,
+        self.lr_scheduler = LRScheduler(
+            max_steps=self.train_steps,
+            max_lr=self.max_lr,
             min_lr=self.min_lr,
-            cooldown_steps=self.n_cooldown_steps,
-            main_steps=self.n_main_steps,
-            warmup_steps=self.n_warmup_steps,
+            warmup_frac=self.warmup_fraction,
+            cool_down_frac=self.cooldown_fraction,
+            cooldown_type=self.cooldown_type,
             torch_scheduler=self.torch_scheduler,
             torch_scheduler_args=self.torch_scheduler_args,
         )
@@ -284,9 +262,22 @@ class TrainConfig(BaseConfig):
             log_dir=None,
         )
 
+    @property
+    def true_weight_decay(self) -> float:
+        if self.independent_wd:
+            return self.weight_decay / self.lr_scheduler.max_lr
+        return self.weight_decay
+
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
-        yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> TrainConfig:
+        if yaml_hook is not None:
+            yaml_config = yaml_hook(yaml_config)
+        try:
+            yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+        except TypeError:
+            # Depending on if the train_config was saved with defaults or not
+            # the model_config might have extra arguments
+            yaml_config["model_config"] = ConfigWrapper.from_config(Config(**yaml_config["model_config"]))
         return cls(**yaml_config)
 
 
@@ -314,9 +305,9 @@ class PipelineConfig(BaseConfig):
         self.data_config.block_size = self.train_config.block_size
 
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> PipelineConfig:
         yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
-        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
+        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"], yaml_hook)
         if yaml_config.get("eval_config"):
             yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
         else:
@@ -326,7 +317,7 @@ class PipelineConfig(BaseConfig):
 
 if __name__ == "__main__":
     conf = TrainConfig(
-        init_lr=0.001,
+        max_lr=0.001,
         micro_batch_size=1,
         block_size=1028,
         weight_decay=0.001,

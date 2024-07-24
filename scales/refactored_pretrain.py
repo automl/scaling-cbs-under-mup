@@ -1,13 +1,5 @@
 """This is a custom implementation for pretraining language models with litgpt and a simple version for getting
-started.
-
-Current missing features:
-
-- No precision editing from fabric
-- No logger (only to terminal)
-- No grad accumulation
-
-"""
+started."""
 
 from __future__ import annotations
 
@@ -20,7 +12,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.model import Config
+from litgpt.config import Config
 from litgpt.utils import CycleIterator, init_out_dir, parse_devices
 from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
@@ -28,12 +20,8 @@ from torch.utils.data import DataLoader
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
 from scales.model import GPT_Scales, file_data_share
-from scales.utils import (
-    load_checkpoint,
-    load_checkpoint_state,
-    save_checkpoint,
-    save_checkpoint_state,
-)
+from scales.tblog_utils import load_tb
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -92,8 +80,9 @@ def main(
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
-    with open(out_dir / "train_config.yaml", "w") as f:
-        yaml.dump(train_args.to_dict(), f)
+
+    # Note, this train_args is NOT the same as the one passed to the function
+    train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
 
     train_time = time.time()
 
@@ -113,6 +102,8 @@ def main(
 
     fabric.barrier()
     save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
+    df = load_tb(output_dir=out_dir, train_config_file_name="train_config_post_init")
+    df.to_csv(str(out_dir / "tb_logs.csv"))
 
     if train_args.save_state_path is not None:
         result_path = train_args.save_state_path / "result.yaml"
@@ -151,8 +142,8 @@ def init_state(
 
     train_args.logging_args.start_logger()
 
+    states: Dict[str, Any] = {}
     if load_model_from_path is None:
-        states: Dict[str, Any] = {}
         model = GPT_Scales(train_args.model_config, mup=train_args.load_base_shape_path is not None)
         if train_args.load_base_shape_path:
             set_base_shapes(model, train_args.load_base_shape_path)
@@ -162,7 +153,7 @@ def init_state(
                 "The configuration yaml in the loaded directory will be used "
                 "`model_config_file` and `model_name` are ignored"
             )
-        states, model_path = load_checkpoint(fabric, load_model_from_path)
+        states, model_path = load_checkpoint(fabric, states, load_model_from_path)
         config = Config.from_file(model_path)
         model = GPT_Scales(config, mup=train_args.load_base_shape_path is not None)
         if train_args.load_base_shape_path:
@@ -178,60 +169,32 @@ def init_state(
     if train_args.load_base_shape_path:
         fabric.print("Using MuP Optimizer")
         optimizer = MuAdamW(
-            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
         )
         model = fabric.setup(model)
+    # TODO: how to init model weights correctly
     else:
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+            model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.true_weight_decay, betas=(0.9, 0.95)
         )
         model = fabric.setup(model)
 
-    if train_args.lr_scheduler.torch_scheduler is not None:
-        torch_scheduler = train_args.lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
-    else:
-        torch_scheduler = None
-    if len(states) != 0 and torch_scheduler is not None:
-        torch_scheduler.load_state_dict(states["torch_scheduler"])
+    torch_scheduler = train_args.lr_scheduler.scheduler
 
-    if len(states) != 0:
-        optimizer.load_state_dict(states["optimizer"])
     optimizer = fabric.setup_optimizers(optimizer)
-
-    if len(states) == 0:
-        states["train_steps"] = 0
-        states["train_tokens"] = 0
 
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
-    if save_init_state:
-        save_checkpoint_state(
-            save_state_path=Path(train_args.save_state_path),
-            train_steps=states["train_steps"],
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
-        )
-
-    # load checkpoint state
-    train_steps = 0
-    if train_args.load_state_path is not None:
-        # load the state here
-        train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
-            load_state_path=Path(train_args.load_state_path),
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=train_args.overwrite_state,
-        )
-
-    states["train_steps"] = train_steps
+    states["train_tokens"] = 0
+    states["train_steps"] = 0
     states["model"] = model
     states["optimizer"] = optimizer
-    states["lr_scheduler"] = train_args.lr_scheduler
     states["torch_scheduler"] = torch_scheduler
+    if save_init_state:
+        save_checkpoint(
+            fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
+        )
 
     return states
 
@@ -249,7 +212,7 @@ def train(
     tokens_per_step = train_args.block_size * effective_batch_size
     accumulation_iters = train_args.accumulation_iters
 
-    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None}
+    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None, "train_loss": None}
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
@@ -297,7 +260,6 @@ def train(
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
-                accumulation_iters=accumulation_iters,
                 last=last_step,
             )
             logger.max_attention_logits_per_layer(
@@ -315,6 +277,12 @@ def train(
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
+
+            if getattr(train_args, "z_loss_eps", None) is not None:
+                # implementation from
+                # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
+                z_loss = train_args.z_loss_eps * torch.square(torch.logsumexp(logits, dim=-1)).mean()
+                loss += z_loss
             fabric.backward(loss / accumulation_iters)
             device_running_loss += loss.item() / accumulation_iters
 
@@ -331,13 +299,16 @@ def train(
                 )
             logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
-            # states["lr_scheduler"].step(
-            #     steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
-            # )
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_max(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
+
             states["optimizer"].step()
+            logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
+
+            train_args.lr_scheduler.step(steps=states["train_steps"] + 1, optimizer=states["optimizer"])
             end_time = time.time()
 
             total_batch_time = fabric.all_reduce(torch.tensor(end_time - start_time), reduce_op="mean")
@@ -348,6 +319,7 @@ def train(
             avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
+            result["train_loss"] = loss.item()
             logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
@@ -379,14 +351,16 @@ def train(
         if (
             states["train_steps"] % train_args.save_state_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
-            save_checkpoint_state(
-                save_state_path=Path(str(train_args.save_state_path)),
-                train_steps=states["train_steps"],
-                model=states["model"],
-                optimizer=states["optimizer"],
-                scheduler=states["torch_scheduler"],
-                overwrite_checkpoint=train_args.overwrite_state,
-            )
+            states["torch_scheduler"] = train_args.lr_scheduler.scheduler
+            save_checkpoint(fabric, state=states, checkpoint_dir=Path(str(train_args.save_state_path)))
+            # save_checkpoint_state(
+            #     save_state_path=Path(str(train_args.save_state_path)),
+            #     train_steps=states["train_steps"],
+            #     model=states["model"],
+            #     optimizer=states["optimizer"],
+            #     scheduler=states["torch_scheduler"],
+            #     overwrite_checkpoint=train_args.overwrite_state,
+            # )
             if train_args.save_state_path is not None:
                 result_path = train_args.save_state_path / "result.yaml"
                 with result_path.open(mode="w", encoding="utf-8") as file:

@@ -154,19 +154,19 @@ class Plotter:
 
     @staticmethod
     def save_fig(fig: matplotlib.figure.Figure, out_path: Path) -> None:
-        if not out_path.exists() or not out_path.is_file():
-            title = fig.axes[0].get_title()
-            out_path = out_path / f"{title}.png"
+        # if not out_path.exists() or not out_path.is_file():
+        #     title = fig.axes[0].get_title()
+        #     out_path = out_path / f"{title}.png"
         fig.savefig(str(out_path))
 
 
 def main(configs_dir: Path | str, results_dir: Path | str, collected_metrics: list[str]) -> None:
-    data = collect_res(Path(configs_dir), Path(results_dir), collected_metrics)
+    data = collect_res(Path(configs_dir), Path(results_dir), collected_metrics).fillna(10.0)
     p = Plotter(data)
     fig = p.create_subplots_figure(
-        data, x_col="n_head", y_col="val_loss", color_col="n_layer", subplot_col="d_model", ncols=2, nrows=2
+        data, x_col="n_head", y_col="val_loss", color_col="d_model", subplot_col="n_layer", ncols=2, nrows=2
     )
-    p.save_fig(fig, Path(results_dir))
+    p.save_fig(fig, Path(results_dir) / "mulitline_2.png")
 
 
 if __name__ == "__main__":
