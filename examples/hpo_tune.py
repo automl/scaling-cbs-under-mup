@@ -32,17 +32,12 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
     )
 
     train_conf = TrainConfig(
-        init_lr=hparams.get("lr"),  # type: ignore
-        micro_batch_size=8,
+        max_lr=hparams.get("lr"),  # type: ignore
+        micro_batch_size=1,
         block_size=1024,
         weight_decay=0.0,
         max_val_steps=2,
         accumulation_iters=1,
-        n_warmup_steps=None,
-        n_main_steps=None,
-        n_cooldown_steps=None,
-        torch_scheduler="CosineAnnealingLR",
-        torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
         model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=32),
         tracked_metrics={
             "train_loss": 5,
@@ -54,7 +49,7 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
             "max_attention_logits_per_layer": 10,
             "max_attention_logits_all": 10,
         },
-        max_train_steps=10000,
+        max_train_steps=2,
     )
 
     config = PipelineConfig(data_config=data_handler, train_config=train_conf)
