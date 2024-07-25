@@ -59,14 +59,13 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
         else:
             scale_factor = 1 / math.sqrt(q.size(-1)) if scale is None else scale
 
-        attn_bias = torch.zeros(L, S, dtype=q.dtype)
+        attn_bias = torch.zeros(L, S, dtype=q.dtype, device=q.device)
         if mask is None:
             temp_mask = torch.ones(L, S, dtype=torch.bool, device=q.device).tril(diagonal=0)
             attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
             attn_bias.to(q.dtype)
 
         attn_weight = q @ k.transpose(-2, -1) * scale_factor
-        attn_bias = attn_bias.to(attn_weight.device)
         attn_weight += attn_bias
 
         file_data_share.layer_wise_max_attn_weight.append(torch.max(attn_weight).item())
