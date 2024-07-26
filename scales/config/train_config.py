@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from litgpt.config import Config
 from litgpt.model import GPT
@@ -147,9 +147,10 @@ class TrainConfig(BaseConfig):
     """Config object for model config."""
     model_config_path: Path | None = None
     """Config Path for the Config object, ignored if model_config provided."""
-
     model_name: str | None = None
     """Model name to load from HF hub."""
+    weight_init_type: Literal["plain", "scaled"] | None = None
+    """Model weight initialization."""
 
     # LR scheduler
     cooldown_fraction: float | None = None

@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
-from scales.model import GPT_Scales, file_data_share
+from scales.model import GPT_Scales, file_data_share, initialize_weights
 from scales.tblog_utils import load_tb
 from scales.utils import load_checkpoint, save_checkpoint
 
@@ -145,6 +145,8 @@ def init_state(
         set_base_shapes(states["model"], train_args.mup_base_shape_path, rescale_params=False)
     elif train_args.mup_base_shape_path:
         set_base_shapes(states["model"], train_args.mup_base_shape_path)
+
+    initialize_weights(fabric, states["model"], train_args.weight_init_type)
 
     if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")

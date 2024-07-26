@@ -1,10 +1,15 @@
 import math
-from typing import Optional
+from functools import partial
+from typing import Literal, Optional
+from warnings import warn
 
+import lightning as L
 import torch
 import torch.nn as nn
+from lightning.fabric.strategies import FSDPStrategy
 from litgpt.config import Config
-from litgpt.model import GPT, Block, CausalSelfAttention
+from litgpt.model import GPT, Block, CausalSelfAttention, GptNeoxMLP, LLaMAMLP
+from litgpt.pretrain import reset_parameters
 from mup import MuReadout
 
 
@@ -74,3 +79,34 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
         y = attn_weight @ v
 
         return y.transpose(1, 2)
+
+
+def initialize_weights(
+    fabric: L.Fabric, model: GPT_Scales, init_type: Literal["plain", "scaled"] | None = None
+) -> None:
+    def init_weights(module: nn.Module, std: float) -> None:
+        nn.init.normal_(module.weight, mean=0.0, std=std)
+        if getattr(module, "bias", None) is not None:
+            nn.init.zeros_(module.bias)
+
+    if init_type == "plain" or init_type == "scaled":
+        # Weight initialization from https://arxiv.org/abs/2312.16903
+        std = math.sqrt(2.0 / (5 * model.config.n_embd))
+
+        for mod in model.modules():
+            if isinstance(mod, (nn.Embedding, nn.Linear)):
+                mod.reset_parameters = partial(init_weights, mod, std=std)
+
+        # need a separate loop because `mod.proj` below is a `nn.Linear` too
+        if init_type == "scaled":
+            for mod in model.modules():
+                if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
+                    mod.proj.reset_parameters = partial(
+                        init_weights, mod.proj, std=(std / math.sqrt(model.config.n_layer * 2))
+                    )
+
+        if not isinstance(fabric.strategy, FSDPStrategy):
+            reset_parameters(model)
+
+    else:
+        warn(f"The init_type {init_type} is not supported.")
