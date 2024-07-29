@@ -139,14 +139,19 @@ def init_state(
     train_args.logging_args.start_logger()
 
     states: Dict[str, Any] = {"train_tokens": 0, "train_steps": 0, "torch_scheduler": train_args.lr_scheduler.scheduler}
-    states["model"] = GPT_Scales(train_args.model_config, mup=train_args.mup_base_shape_path is not None)
+    states["model"] = GPT_Scales(train_args.model_config, mup_init=train_args.mup_base_shape_path is not None)
 
     if train_args.load_state_path and train_args.mup_base_shape_path:
         set_base_shapes(states["model"], train_args.mup_base_shape_path, rescale_params=False)
     elif train_args.mup_base_shape_path:
         set_base_shapes(states["model"], train_args.mup_base_shape_path)
 
-    initialize_weights(fabric, states["model"], train_args.weight_init_type)
+    initialize_weights(
+        fabric=fabric,
+        model=states["model"],
+        mup_init=train_args.mup_base_shape_path is not None,
+        init_type=train_args.weight_init_type,
+    )
 
     if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")

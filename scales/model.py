@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from warnings import warn
 
 import lightning as L
+import mup
 import torch
 import torch.nn as nn
 from lightning.fabric.strategies import FSDPStrategy
@@ -24,9 +25,9 @@ class file_data_share:
 
 
 class GPT_Scales(GPT):
-    def __init__(self, config: Config, mup: bool = False) -> None:
+    def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
-        if mup:
+        if mup_init:
             self.lm_head = MuReadout(
                 config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias, readout_zero_init=True
             )
@@ -35,31 +36,31 @@ class GPT_Scales(GPT):
         self.transformer = nn.ModuleDict(
             {
                 "wte": nn.Embedding(config.padded_vocab_size, config.n_embd),
-                "h": nn.ModuleList(Block_Scales(config, mup) for _ in range(config.n_layer)),
+                "h": nn.ModuleList(Block_Scales(config, mup_init) for _ in range(config.n_layer)),
                 "ln_f": config.norm_class(config.n_embd, eps=config.norm_eps),
             }
         )
 
 
 class Block_Scales(Block):
-    def __init__(self, config: Config, mup: bool = False) -> None:
+    def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
-        self.attn = CausalSelfAttention_Scales(config, mup)
+        self.attn = CausalSelfAttention_Scales(config, mup_init)
 
 
 class CausalSelfAttention_Scales(CausalSelfAttention):
-    def __init__(self, config: Config, mup: bool = False) -> None:
+    def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
-        self.mup = mup
+        self.mup_init = mup_init
 
     def scaled_dot_product_attention(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        scale = 1.0 / self.config.head_size if self.mup else 1.0 / math.sqrt(self.config.head_size)
+        scale = 1.0 / self.config.head_size if self.mup_init else 1.0 / math.sqrt(self.config.head_size)
 
         L, S = q.size(-2), k.size(-2)
 
-        if self.mup:
+        if self.mup_init:
             scale_factor = 1 / (q.size(-1)) if scale is None else scale
         else:
             scale_factor = 1 / math.sqrt(q.size(-1)) if scale is None else scale
@@ -82,34 +83,43 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
 
 
 def initialize_weights(
-    fabric: L.Fabric, model: GPT_Scales, init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None
+    fabric: L.Fabric,
+    model: GPT_Scales,
+    mup_init: bool = False,
+    init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None,
 ) -> None:
-    def init_weights(module: nn.Module, std: float) -> None:
-        nn.init.normal_(module.weight, mean=0.0, std=std)
+    def init_weights(module: nn.Module, std: float, mup_init: bool) -> None:
+        if mup_init:
+            mup.init.normal_(module.weight, mean=0.0, std=std)
+        else:
+            nn.init.normal_(module.weight, mean=0.0, std=std)
         if getattr(module, "bias", None) is not None:
             nn.init.zeros_(module.bias)
 
     if init_type == "plain" or init_type == "scaled" or init_type == "GPT-NeoX":
-        # "scaled" and "plain" Weight initialization from https://arxiv.org/abs/2312.16903
-        std = math.sqrt(2.0 / (5 * model.config.n_embd))
+        # "scaled" and "plain" Weight initialization (https://arxiv.org/abs/2312.16903).
+        sigma = math.sqrt(2.0 / (5 * model.config.n_embd))
 
         for mod in model.modules():
             if isinstance(mod, (nn.Embedding, nn.Linear)):
-                mod.reset_parameters = partial(init_weights, mod, std=std)
+                mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=mup_init)
 
         # need a separate loop because `mod.proj` below is a `nn.Linear` too
         if init_type == "scaled":
             for mod in model.modules():
                 if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
                     mod.proj.reset_parameters = partial(
-                        init_weights, mod.proj, std=(std / math.sqrt(model.config.n_layer * 2))
+                        init_weights, mod.proj, std=(sigma / math.sqrt(model.config.n_layer * 2)), mup_init=mup_init
                     )
         elif init_type == "GPT-NeoX":
             # GPT-NeoX-20B weight initialization (https://arxiv.org/abs/2204.06745).
             for mod in model.modules():
                 if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
                     mod.proj.reset_parameters = partial(
-                        init_weights, mod.proj, std=(1 / math.sqrt(model.config.n_embd) / model.config.n_layer)
+                        init_weights,
+                        mod.proj,
+                        std=(1 / math.sqrt(model.config.n_embd) / model.config.n_layer),
+                        mup_init=mup_init,
                     )
 
         if not isinstance(fabric.strategy, FSDPStrategy):

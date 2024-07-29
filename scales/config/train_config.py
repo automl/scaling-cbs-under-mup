@@ -149,7 +149,7 @@ class TrainConfig(BaseConfig):
     """Config Path for the Config object, ignored if model_config provided."""
     model_name: str | None = None
     """Model name to load from HF hub."""
-    weight_init_type: Literal["plain", "scaled"] | None = None
+    weight_init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None
     """Model weight initialization."""
 
     # LR scheduler
