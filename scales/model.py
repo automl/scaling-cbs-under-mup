@@ -82,15 +82,15 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
 
 
 def initialize_weights(
-    fabric: L.Fabric, model: GPT_Scales, init_type: Literal["plain", "scaled"] | None = None
+    fabric: L.Fabric, model: GPT_Scales, init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None
 ) -> None:
     def init_weights(module: nn.Module, std: float) -> None:
         nn.init.normal_(module.weight, mean=0.0, std=std)
         if getattr(module, "bias", None) is not None:
             nn.init.zeros_(module.bias)
 
-    if init_type == "plain" or init_type == "scaled":
-        # Weight initialization from https://arxiv.org/abs/2312.16903
+    if init_type == "plain" or init_type == "scaled" or init_type == "GPT-NeoX":
+        # "scaled" and "plain" Weight initialization from https://arxiv.org/abs/2312.16903
         std = math.sqrt(2.0 / (5 * model.config.n_embd))
 
         for mod in model.modules():
@@ -103,6 +103,13 @@ def initialize_weights(
                 if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
                     mod.proj.reset_parameters = partial(
                         init_weights, mod.proj, std=(std / math.sqrt(model.config.n_layer * 2))
+                    )
+        elif init_type == "GPT-NeoX":
+            # GPT-NeoX-20B weight initialization (https://arxiv.org/abs/2204.06745).
+            for mod in model.modules():
+                if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
+                    mod.proj.reset_parameters = partial(
+                        init_weights, mod.proj, std=(1 / math.sqrt(model.config.n_embd) / model.config.n_layer)
                     )
 
         if not isinstance(fabric.strategy, FSDPStrategy):
