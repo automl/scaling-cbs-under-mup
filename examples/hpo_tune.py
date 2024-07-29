@@ -1,9 +1,14 @@
+import argparse
 import logging
+import random
 from pathlib import Path
 from typing import Any
 
 import lightning as L
 import neps
+import neps.api
+import numpy as np
+import torch
 from litgpt.config import Config
 
 from scales.config.data_config import DataHandler
@@ -11,14 +16,17 @@ from scales.config.train_config import PipelineConfig, TrainConfig
 from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
 
+SEED = 444
 
-def search_space() -> dict:
+
+def search_space(accumulation_iters: int = 1) -> dict:
     return {
-        "lr": neps.FloatParameter(lower=1e-5, upper=1e-1, log=True, default=1e-3),
+        "lr_exponent": neps.FloatParameter(lower=1, upper=5),
+        "accumulation_iters": neps.ConstantParameter(value=accumulation_iters),
     }
 
 
-def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **hparams: Any) -> float:
+def run_pipeline(pipeline_directory: Path, **hparams: Any) -> dict[str, Any]:
     fabric = L.Fabric(accelerator="auto", strategy="auto")
 
     data_handler = DataHandler(
@@ -31,25 +39,31 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         subsample_index=0,
     )
 
+    lr_exponent = -float(hparams.get("lr_exponent"))  # type: ignore
+
     train_conf = TrainConfig(
-        max_lr=hparams.get("lr"),  # type: ignore
-        micro_batch_size=1,
+        max_lr=10**lr_exponent,
+        seed=SEED,
+        weight_init_type="GPT-NeoX",
+        micro_batch_size=8,
         block_size=1024,
         weight_decay=0.0,
         max_val_steps=2,
-        accumulation_iters=1,
-        model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=32),
+        accumulation_iters=hparams.get("accumulation_iters"),  # type: ignore
+        model_config=Config(block_size=1024, n_layer=24, n_head=4, vocab_size=50257, bias=True, n_embd=96),
         tracked_metrics={
-            "train_loss": 5,
+            "train_loss": 1,
+            "learning_rate": 5,
+            "optimizer_stats": 1,
             "validation_loss": 5,
             "total_gradient_norm": 10,
             "output_logits_mean": 10,
             "output_logits_max": 10,
             "gradient_norm_per_layer": 20,
-            "max_attention_logits_per_layer": 10,
-            "max_attention_logits_all": 10,
+            "max_attention_logits_per_layer": 5,
+            "max_attention_logits_all": 5,
         },
-        max_train_steps=2,
+        tokens_per_param=20,
     )
 
     config = PipelineConfig(data_config=data_handler, train_config=train_conf)
@@ -63,15 +77,32 @@ def run_pipeline(pipeline_directory: Path, previous_pipeline_directory: Path, **
         out_dir=pipeline_directory / "gpt_output",
     )
 
-    return result_dict["val_loss"]
+    return {
+        "loss": result_dict["train_loss"],
+        "lr": 10**lr_exponent,
+        "val_loss": result_dict["val_loss"],
+    }
+
+
+def set_seed(seed: int = 123) -> None:
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Parser for SP training")
+    parser.add_argument(
+        "--accumulation_iters", type=int, default=1, help="Accumulation iterations for effective batch size"
+    )
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    set_seed(SEED)
     neps.run(
         run_pipeline=run_pipeline,
-        pipeline_space=search_space(),
-        root_directory=Path(__file__).parent / "tune_lr",
-        max_evaluations_total=20,
-        searcher="bayesian_optimization",
+        pipeline_space=search_space(accumulation_iters=args.accumulation_iters),
+        root_directory=Path(__file__).parent / f"tune_lr_accit{args.accumulation_iters}",
+        max_evaluations_total=10,
+        searcher="grid_search",
+        grid_step_size=10,
     )
