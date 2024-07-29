@@ -90,7 +90,7 @@ def initialize_weights(
 ) -> None:
     def init_weights(module: nn.Module, std: float, mup_init: bool) -> None:
         if mup_init:
-            mup.init.normal_(module.weight, mean=0.0, std=std)
+            mup.normal_(module.weight, mean=0.0, std=std)
         else:
             nn.init.normal_(module.weight, mean=0.0, std=std)
         if getattr(module, "bias", None) is not None:
