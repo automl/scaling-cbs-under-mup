@@ -65,14 +65,12 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
         else:
             scale_factor = 1 / math.sqrt(q.size(-1)) if scale is None else scale
 
-        attn_bias = torch.zeros(L, S, dtype=q.dtype, device=q.device)
-        if mask is None:
-            temp_mask = torch.ones(L, S, dtype=torch.bool, device=q.device).tril(diagonal=0)
-            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            attn_bias.to(q.dtype)
-
+        # a bit more memory efficient version of causal self attention
+        # https://github.com/karpathy/nanoGPT/blob/9755682b981a45507f6eb9b11eadef8cb83cebd5/model.py#L67
         attn_weight = q @ k.transpose(-2, -1) * scale_factor
-        attn_weight += attn_bias
+        attn_bias = torch.ones(L, S, dtype=q.dtype, device=q.device).tril(diagonal=0).requires_grad_(False)
+        attn_weight = attn_weight.masked_fill_(attn_bias == 0, float("-inf"))
+        del attn_bias
 
         file_data_share.layer_wise_max_attn_weight.append(torch.max(attn_weight).item())
 
