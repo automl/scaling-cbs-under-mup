@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 from litgpt.config import Config
-from litgpt.model import GPT
+
+# from litgpt.model import GPT
 from litgpt.utils import num_parameters, parse_devices
+from mup import get_shapes, load_base_shapes, make_base_shapes
 
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
@@ -14,6 +17,7 @@ from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
 from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
+from scales.model import GPT_Scales
 
 
 def resolve_model_config(
@@ -109,6 +113,23 @@ def resolve_train_steps(
     return train_steps
 
 
+def get_mup_base_shape(target_config: Config | ConfigWrapper, base_scales: dict[str, int] | None) -> dict | None:
+    base_config = ConfigWrapper.from_config(target_config)
+    delta_config = deepcopy(base_config)
+    if base_scales is not None:
+        # Set the scale of base and delta config
+        for name, base_scale in base_scales.items():
+            setattr(base_config, name, base_scale)
+            setattr(delta_config, name, base_scale * 2)
+        base_config = ConfigWrapper.from_config(base_config.config)
+        delta_config = ConfigWrapper.from_config(delta_config.config)
+
+    base_shapes = get_shapes(GPT_Scales(base_config, mup_init=True))
+    delta_shapes = get_shapes(GPT_Scales(delta_config, mup_init=True))
+
+    return make_base_shapes(base_shapes, delta_shapes)
+
+
 @dataclass
 class TrainConfig(BaseConfig):
     """Configuration to specify a recipie for the model training. This class initializes all the necessary values used
@@ -180,12 +201,22 @@ class TrainConfig(BaseConfig):
     """Number of steps after which to validate the model."""
     z_loss_eps: float | None = None
     "Epsilon value for Z loss"
+
+    # optimizer
+    adam_beta_1: float = 0.9
+    """Adam beta_1."""
+    adam_beta_2: float = 0.95
+    """Adam beta_2."""
+    adam_eps: float = 1e-8
+    """Adam epsilon."""
     independent_wd: bool = False
     "Whether to use independent weight decay during AdamW"
 
     # MuParam width
+    mup_base_scales: dict[str, int] | int | None = None
+    """Dict of scaling dimension to base scale."""
     mup_base_shape_path: str | Path | None = None
-    """The path of the base model shape, needs to be stored before running mup."""
+    """The path of the base model shape, ."""
 
     # logging details
     tracked_metrics: dict[str, int] | None = None
@@ -231,8 +262,9 @@ class TrainConfig(BaseConfig):
         # override model block_size
         self.model_config.block_size = self.block_size
         self.model_config = ConfigWrapper.from_config(self.model_config)
+        self._mup_base_shape: dict | None = None
 
-        self.trainable_params = num_parameters(GPT(self.model_config), requires_grad=True)
+        self.trainable_params = num_parameters(GPT_Scales(self.model_config), requires_grad=True)
 
         self.train_steps = resolve_train_steps(
             max_tokens=self.max_tokens,
@@ -269,6 +301,20 @@ class TrainConfig(BaseConfig):
         if self.independent_wd:
             return self.weight_decay / self.lr_scheduler.max_lr
         return self.weight_decay
+
+    @property
+    def mup_base_shape(self) -> dict | None:
+        if self._mup_base_shape is not None:
+            return self._mup_base_shape
+        if self.mup_base_scales is None and self.mup_base_shape_path is not None:
+            self._mup_base_shape = load_base_shapes(str(self.mup_base_shape_path))
+            return self._mup_base_shape
+        if isinstance(self.mup_base_scales, int):
+            self.mup_base_scales = {"d_model": self.mup_base_scales}
+        if isinstance(self.mup_base_scales, dict):
+            self._mup_base_shape = get_mup_base_shape(self.model_config, self.mup_base_scales)
+
+        return self._mup_base_shape
 
     @classmethod
     def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> TrainConfig:

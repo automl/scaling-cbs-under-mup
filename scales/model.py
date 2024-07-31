@@ -72,7 +72,7 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
         attn_weight = attn_weight.masked_fill_(attn_bias == 0, float("-inf"))
         del attn_bias
 
-        file_data_share.layer_wise_max_attn_weight.append(torch.max(attn_weight).item())
+        file_data_share.layer_wise_max_attn_weight.append(torch.max(attn_weight).detach().item())
 
         attn_weight = torch.softmax(attn_weight, dim=-1)
         y = attn_weight @ v

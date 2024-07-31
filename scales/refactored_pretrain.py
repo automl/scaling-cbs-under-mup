@@ -137,19 +137,19 @@ def init_state(
         train_args.logging_args.log_dir = out_dir / "logs"
 
     train_args.logging_args.start_logger()
-
+    # accessing this attribute here so base and delta models
+    # can be garbage collected before the target model is loaded
+    mup_base_shape = train_args.mup_base_shape
     states: Dict[str, Any] = {"train_tokens": 0, "train_steps": 0, "torch_scheduler": train_args.lr_scheduler.scheduler}
-    states["model"] = GPT_Scales(train_args.model_config, mup_init=train_args.mup_base_shape_path is not None)
+    states["model"] = GPT_Scales(train_args.model_config, mup_init=mup_base_shape is not None)
 
-    if train_args.load_state_path and train_args.mup_base_shape_path:
-        set_base_shapes(states["model"], train_args.mup_base_shape_path, rescale_params=False)
-    elif train_args.mup_base_shape_path:
-        set_base_shapes(states["model"], train_args.mup_base_shape_path)
+    if mup_base_shape is not None:
+        set_base_shapes(states["model"], mup_base_shape, rescale_params=train_args.load_state_path is None)
 
     initialize_weights(
         fabric=fabric,
         model=states["model"],
-        mup_init=train_args.mup_base_shape_path is not None,
+        mup_init=train_args.mup_base_shape is not None,
         init_type=train_args.weight_init_type,
     )
 
@@ -157,20 +157,22 @@ def init_state(
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
     # TODO: how to init model weights correctly
-    if train_args.mup_base_shape_path:
+    if train_args.mup_base_shape:
         fabric.print("Using MuP Optimizer")
         states["optimizer"] = MuAdamW(
             states["model"].parameters(),
             lr=train_args.lr_scheduler.init_lr,
             weight_decay=train_args.true_weight_decay,
-            betas=(0.9, 0.95),
+            betas=(train_args.adam_beta_1, train_args.adam_beta_2),
+            eps=train_args.adam_eps,
         )
     else:
         states["optimizer"] = torch.optim.AdamW(
             states["model"].parameters(),
             lr=train_args.lr_scheduler.init_lr,
             weight_decay=train_args.true_weight_decay,
-            betas=(0.9, 0.95),
+            betas=(train_args.adam_beta_1, train_args.adam_beta_2),
+            eps=train_args.adam_eps,
         )
 
     states["model"] = fabric.setup_module(states["model"])
