@@ -3,6 +3,7 @@ started."""
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict
@@ -56,7 +57,13 @@ def main(
     fabric.print(f"Number of trainable parameters: {train_args.trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size, access_internet=access_internet)
+    num_cpus = os.cpu_count()
+    data.load_data_loaders(
+        batch_size=micro_batch_size,
+        block_size=block_size,
+        access_internet=access_internet,
+        num_workers=num_cpus,  # type: ignore
+    )
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]
