@@ -1,49 +1,55 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from warnings import warn
+from typing import Any, Callable, Literal
 
 from litgpt.config import Config
-from litgpt.model import GPT
-from litgpt.utils import num_parameters, parse_devices
 
-from scales.args import LoggingArgs
+# from litgpt.model import GPT
+from litgpt.utils import num_parameters, parse_devices
+from mup import get_shapes, load_base_shapes, make_base_shapes
+
 from scales.config.base_config import BaseConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.data_config import DataHandler, preprocess_wikitext
 from scales.config.eval_config import EvalHandler
+from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
+from scales.model import GPT_Scales
 
 
 def resolve_model_config(
     model_config: Config | None = None,
-    checkpoint_dir: Path | None = None,
     model_config_path: Path | None = None,
+    model_checkpoint_dir: Path | None = None,
     model_name: str | None = None,
 ) -> Config:
-    """4 methods of loading a model configuration..."""
-    if model_config is None:
-        if checkpoint_dir is None:
-            # Setting up model configuration
-            if model_config_path and model_name is None:
-                config = Config.from_file(model_config_path)
-            elif model_name and model_config_path is None:
-                config = Config.from_name(model_name)
-            elif model_config_path and model_name:
-                raise ValueError("Only one of `model_name` or `model_config` can be set.")
-            else:
-                raise ValueError("Please specify `model_name` or `model_config_file`")
+    """4 methods of loading a model configuration...
 
+    Make sure this function always returns an initialized Config no matter what the train_config args are
+
+    """
+    if model_checkpoint_dir is not None:
+        model_checkpoint_dir = Path(model_checkpoint_dir)
+
+    model_config_path = (
+        model_checkpoint_dir / "model_config.yaml"
+        if model_config_path is None and model_checkpoint_dir is not None and model_checkpoint_dir.is_dir()
+        else model_config_path
+    )
+
+    if model_config is None:
+        # Setting up model configuration
+        if model_config_path and model_name is None:
+            config = Config.from_file(model_config_path)
+        elif model_name and model_config_path is None:
+            config = Config.from_name(model_name)
+        elif model_config_path and model_name:
+            raise ValueError("Only one of `model_name` or `model_config_path` can be set.")
         else:
-            if model_config_path or model_name:
-                warn(
-                    "The configuration yaml in the loaded directory will be used "
-                    "`model_config_file` and `model_name` are ignored"
-                )
-            model_path = Path(checkpoint_dir / "model_config.yaml")
-            config = Config.from_file(model_path)
+            raise ValueError("Please specify `model_name` or `model_config_path`")
     else:
         return model_config
 
@@ -59,7 +65,8 @@ def resolve_train_steps(
     trainable_params: int | None = None,
     tokens_per_step: int | None = None,
     accumulation_iters: int = 1,
-    devices: int | str = "auto",
+    devices: int = 1,
+    deepseek_hparams: bool = True,
 ) -> int:
     """3 ways of computing train_steps...
 
@@ -77,6 +84,8 @@ def resolve_train_steps(
             f"Only one of max_train_steps={max_train_steps}, "
             f"tokens_per_param={tokens_per_param}, max_tokens={max_tokens} can be set."
         )
+    if deepseek_hparams and (max_tokens is None or tokens_per_param is None) and max_train_steps:
+        raise ValueError("When using `deepseek_hparams`, one should use either `max_tokens` or `tokens_per_param`")
 
     if max_train_steps:
         train_steps = max_train_steps
@@ -89,8 +98,6 @@ def resolve_train_steps(
                 f"when tokens_per_param={tokens_per_param} is set, trainable_params={trainable_params} "
                 f"must also be set."
             )
-
-    devices = parse_devices(devices=devices)
 
     if max_tokens:
         if tokens_per_step:
@@ -107,48 +114,41 @@ def resolve_train_steps(
     return train_steps
 
 
-def resolve_scheduler_params(
-    init_lr: float,
-    max_train_steps: int,
-    min_lr: float = 0,
-    warmup_steps: int | None = None,
-    main_steps: int | None = None,
-    cooldown_steps: int | None = None,
-    torch_scheduler: str | None = None,
-    torch_scheduler_args: dict | None = None,
-) -> LRScheduler:
-    warmup_steps = 0 if warmup_steps is None else warmup_steps
-    cooldown_steps = 0 if cooldown_steps is None else cooldown_steps
-    main_steps = max_train_steps - warmup_steps - cooldown_steps if main_steps is None else main_steps
+def get_mup_base_shape(target_config: Config | ConfigWrapper, base_scales: dict[str, int] | None) -> dict | None:
+    base_config = ConfigWrapper.from_config(target_config)
+    delta_config = deepcopy(base_config)
+    if base_scales is not None:
+        # Set the scale of base and delta config
+        for name, base_scale in base_scales.items():
+            setattr(base_config, name, base_scale)
+            setattr(delta_config, name, base_scale * 2)
+        base_config = ConfigWrapper.from_config(base_config.config)
+        delta_config = ConfigWrapper.from_config(delta_config.config)
 
-    assert (
-        warmup_steps + cooldown_steps + main_steps == max_train_steps
-    ), f"LR args doesn't match max_train_steps = {max_train_steps} != {warmup_steps} + {cooldown_steps} + {main_steps}"
+    base_shapes = get_shapes(GPT_Scales(base_config, mup_init=True))
+    delta_shapes = get_shapes(GPT_Scales(delta_config, mup_init=True))
 
-    end_warmup_step = warmup_steps
-    end_decay_step = warmup_steps + main_steps
-    end_cooldown_step = warmup_steps + main_steps + cooldown_steps
-
-    # TODO: write an adapter for all torch.optim.LRScheduler classes
-    if torch_scheduler and torch_scheduler == "CosineAnnealingLR":
-        torch_scheduler_args = {} if torch_scheduler_args is None else torch_scheduler_args
-        torch_scheduler_args["T_max"] = main_steps
-
-    return LRScheduler(
-        init_lr=init_lr,
-        min_lr=min_lr,
-        end_decay_step=end_decay_step,
-        end_warmup_step=end_warmup_step,
-        end_cooldown_step=end_cooldown_step,
-        torch_scheduler=torch_scheduler,
-        torch_scheduler_args=torch_scheduler_args,
-    )
+    return make_base_shapes(base_shapes, delta_shapes)
 
 
 @dataclass
 class TrainConfig(BaseConfig):
-    init_lr: float
-    """Initial Learning Rate."""
+    """Configuration to specify a recipie for the model training. This class initializes all the necessary values used
+    during the training based on the initialization arguments.
+
+    Note:
+        This object initializes a Config object which is an input to the GPT model.
+        We never initialize or load model weights inside TrainConfig
+    Note:
+        The arguments that are not appended to the self.ignore_list are not allowed to change during the lifecycle
+        of this object. This is because, those arguments are written into the yaml files when the config is saved,
+        and loaded using those exact values again. Check true_weight_decay attribute for an example.
+    Note:
+        Avoid putting paths inside config objects as they are not reliable, and require to be reset for
+         every training experiment.
+
+    """
+
     micro_batch_size: int
     """The batch per iteration."""
     block_size: int
@@ -157,6 +157,8 @@ class TrainConfig(BaseConfig):
     """Weight Decay for AdamW optimizer."""
     max_val_steps: int
     """N of validation steps on validation data."""
+    max_lr: float | None = None
+    """The maximum Learning Rate."""
     accumulation_iters: int = 1
     """Number of accumulation iters per device."""
     devices: int | str = "auto"
@@ -167,23 +169,19 @@ class TrainConfig(BaseConfig):
     """Config object for model config."""
     model_config_path: Path | None = None
     """Config Path for the Config object, ignored if model_config provided."""
-    model_checkpoint_dir: Path | None = None
-    """Checkpoint directory for a trained model, ignored if model_config provided.
-
-    NOTE: not used for loading pre-trained models. only for loading Config object
-
-    """
     model_name: str | None = None
     """Model name to load from HF hub."""
+    weight_init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek"] | None = None
+    """Model weight initialization."""
 
     # LR scheduler
-    n_main_steps: int | None = None
-    """Number of steps in the torch main/decay schedule."""
-    n_warmup_steps: int | None = None
-    """Number of steps in the warmup schedule."""
-    n_cooldown_steps: int | None = None
-    """Number of steps in the cooldown schedule."""
-    min_lr: float = 0
+    cooldown_fraction: float | None = None
+    """Fraction of steps to cooldown schedule."""
+    warmup_fraction: float | None = None
+    """Fraction of steps in the warmup schedule."""
+    cooldown_type: str = "linear"
+    """When cooldown to min_lr is needed, this should be set to true."""
+    min_lr: float = 0.0
     """`min_lr` the scheduler can reach."""
     torch_scheduler: str | None = None
     """Torch type scheduler defined in a string."""
@@ -202,6 +200,29 @@ class TrainConfig(BaseConfig):
     clip_max_val: float | None = None
     validate_every: int = 5
     """Number of steps after which to validate the model."""
+    z_loss_eps: float | None = None
+    "Epsilon value for Z loss"
+
+    # optimizer
+    adam_beta_1: float = 0.9
+    """Adam beta_1."""
+    adam_beta_2: float = 0.95
+    """Adam beta_2."""
+    adam_eps: float = 1e-8
+    """Adam epsilon."""
+    independent_wd: bool = False
+    "Whether to use independent weight decay during AdamW"
+
+    # MuParam width
+    mup_base_scales: dict[str, int] | int | None = None
+    """Dict of scaling dimension to base scale."""
+    mup_base_shape_path: str | Path | None = None
+    """The path of the base model shape, ."""
+
+    # DeepSeek hyperparameters
+    deepseek_hparams: bool = False
+    """Changes the learning rate, accumulation iters, and weight initialization to match deepseek's algorithm based on
+    compute."""
 
     # logging details
     tracked_metrics: dict[str, int] | None = None
@@ -240,15 +261,45 @@ class TrainConfig(BaseConfig):
         super().__post_init__()
         self.save_state_every = self.validate_every if self.save_state_every is None else self.save_state_every
 
-        self.ignore_fields.extend(["model_config_path", "model_checkpoint_dir", "model_name"])
+        self.ignore_fields.extend(["model_config_path", "model_name"])
         self.model_config = resolve_model_config(
-            self.model_config, self.model_checkpoint_dir, self.model_config_path, self.model_name
+            self.model_config, self.model_config_path, self.load_state_path, self.model_name
         )
         # override model block_size
         self.model_config.block_size = self.block_size
         self.model_config = ConfigWrapper.from_config(self.model_config)
+        self._mup_base_shape: dict | None = None
 
-        self.trainable_params = num_parameters(GPT(self.model_config), requires_grad=True)
+        self.trainable_params = num_parameters(GPT_Scales(self.model_config), requires_grad=True)
+        self.devices = parse_devices(self.devices)
+
+        if isinstance(self.devices, str):
+            raise ValueError("`devices` is wrongly initialized and should be an in")
+
+        if self.deepseek_hparams:
+            model_scale = (
+                72 * self.model_config.n_layer * (self.model_config.config.n_embd**2)
+                + 12 * self.model_config.n_layer * self.model_config.d_model * self.model_config.block_size
+            )
+            if self.max_tokens:
+                compute = model_scale * self.max_tokens
+            elif self.tokens_per_param and self.trainable_params:
+                compute = model_scale * self.tokens_per_param * self.trainable_params
+            else:
+                raise ValueError("An error has accured during DeepSeek's compute calculation")
+
+            optim_deepseek_lr = 0.3119 * (compute**-0.125)
+            optim_deepseek_effective_batch_size = 0.2920 * (compute**0.3271)
+
+            self.max_lr = optim_deepseek_lr
+            self.accumulation_iters = round(
+                optim_deepseek_effective_batch_size
+                / (self.devices * self.micro_batch_size * self.model_config.block_size)
+            )
+
+            # Just a check for when the rounding is too low
+            if self.accumulation_iters <= 0:
+                self.accumulation_iters = 1
 
         self.train_steps = resolve_train_steps(
             max_tokens=self.max_tokens,
@@ -259,15 +310,19 @@ class TrainConfig(BaseConfig):
             trainable_params=self.trainable_params,
             accumulation_iters=self.accumulation_iters,
             devices=self.devices,
+            deepseek_hparams=self.deepseek_hparams,
         )
 
-        self.lr_scheduler = resolve_scheduler_params(
-            init_lr=self.init_lr,
-            max_train_steps=self.train_steps,
+        if self.max_lr is None:
+            raise ValueError("`max_lr` should not be `None`")
+
+        self.lr_scheduler = LRScheduler(
+            max_steps=self.train_steps,
+            max_lr=self.max_lr,
             min_lr=self.min_lr,
-            cooldown_steps=self.n_cooldown_steps,
-            main_steps=self.n_main_steps,
-            warmup_steps=self.n_warmup_steps,
+            warmup_frac=self.warmup_fraction,
+            cool_down_frac=self.cooldown_fraction,
+            cooldown_type=self.cooldown_type,
             torch_scheduler=self.torch_scheduler,
             torch_scheduler_args=self.torch_scheduler_args,
         )
@@ -280,9 +335,36 @@ class TrainConfig(BaseConfig):
             log_dir=None,
         )
 
+    @property
+    def true_weight_decay(self) -> float:
+        if self.independent_wd:
+            return self.weight_decay / self.lr_scheduler.max_lr
+        return self.weight_decay
+
+    @property
+    def mup_base_shape(self) -> dict | None:
+        if self._mup_base_shape is not None:
+            return self._mup_base_shape
+        if self.mup_base_scales is None and self.mup_base_shape_path is not None:
+            self._mup_base_shape = load_base_shapes(str(self.mup_base_shape_path))
+            return self._mup_base_shape
+        if isinstance(self.mup_base_scales, int):
+            self.mup_base_scales = {"d_model": self.mup_base_scales}
+        if isinstance(self.mup_base_scales, dict):
+            self._mup_base_shape = get_mup_base_shape(self.model_config, self.mup_base_scales)
+
+        return self._mup_base_shape
+
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> TrainConfig:
-        yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> TrainConfig:
+        if yaml_hook is not None:
+            yaml_config = yaml_hook(yaml_config)
+        try:
+            yaml_config["model_config"] = ConfigWrapper.from_yaml(yaml_config["model_config"])
+        except TypeError:
+            # Depending on if the train_config was saved with defaults or not
+            # the model_config might have extra arguments
+            yaml_config["model_config"] = ConfigWrapper.from_config(Config(**yaml_config["model_config"]))
         return cls(**yaml_config)
 
 
@@ -310,9 +392,9 @@ class PipelineConfig(BaseConfig):
         self.data_config.block_size = self.train_config.block_size
 
     @classmethod
-    def from_yaml(cls, yaml_config: dict[str, Any]) -> PipelineConfig:
+    def from_yaml(cls, yaml_config: dict[str, Any], yaml_hook: Callable | None = None) -> PipelineConfig:
         yaml_config["data_config"] = DataHandler.from_yaml(yaml_config["data_config"])
-        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"])
+        yaml_config["train_config"] = TrainConfig.from_yaml(yaml_config["train_config"], yaml_hook)
         if yaml_config.get("eval_config"):
             yaml_config["eval_config"] = EvalHandler.from_yaml(yaml_config["eval_config"])
         else:
@@ -322,7 +404,7 @@ class PipelineConfig(BaseConfig):
 
 if __name__ == "__main__":
     conf = TrainConfig(
-        init_lr=0.001,
+        max_lr=0.001,
         micro_batch_size=1,
         block_size=1028,
         weight_decay=0.001,

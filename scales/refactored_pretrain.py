@@ -1,18 +1,9 @@
 """This is a custom implementation for pretraining language models with litgpt and a simple version for getting
-started.
-
-Current missing features:
-
-- No precision editing from fabric
-- No logger (only to terminal)
-- No grad accumulation
-
-"""
+started."""
 
 from __future__ import annotations
 
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict
 
@@ -20,14 +11,15 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.model import GPT, Config
-from litgpt.utils import CycleIterator, init_out_dir, parse_devices
+from litgpt.utils import CycleIterator, init_out_dir
+from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
 
-# from scales.lr_utils import LRScheduler
 from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
-from scales.utils import load_checkpoint, load_checkpoint_state, save_checkpoint, save_checkpoint_state
+from scales.model import GPT_Scales, file_data_share, initialize_weights
+from scales.tblog_utils import load_tb
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -48,14 +40,14 @@ def main(
         out_dir=out_dir,
     )
 
-    device_count = parse_devices(devices=train_args.devices)
+    device_count = train_args.devices
 
     fabric.print(f"Device count:{device_count}")
     fabric.print(f"Current strategy {fabric.strategy}")
 
     assert train_args.accumulation_iters > 0, "`accumulation_iters` should be a positive integer"
 
-    effective_batch_size = device_count * train_args.accumulation_iters * train_args.micro_batch_size
+    effective_batch_size = int(device_count * train_args.accumulation_iters * train_args.micro_batch_size)
     fabric.print(f"Effective batch size for this setup is {effective_batch_size}")
 
     micro_batch_size = train_args.micro_batch_size
@@ -64,7 +56,11 @@ def main(
     fabric.print(f"Number of trainable parameters: {train_args.trainable_params:,}")
 
     # Setting up the data with the relevant tokenizer
-    data.load_data_loaders(batch_size=micro_batch_size, block_size=block_size, access_internet=access_internet)
+    data.load_data_loaders(
+        batch_size=micro_batch_size,
+        block_size=block_size,
+        access_internet=access_internet,
+    )
 
     train_dataloader = data.data_loaders["train"]
     val_dataloader = data.data_loaders["validation"]
@@ -86,8 +82,9 @@ def main(
     }
     with open(out_dir / "info.yaml", "w") as f:
         yaml.dump(_info, f)
-    with open(out_dir / "train_config.yaml", "w") as f:
-        yaml.dump(train_args.to_dict(), f)
+
+    # Note, this train_args is NOT the same as the one passed to the function
+    train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
 
     train_time = time.time()
 
@@ -107,10 +104,13 @@ def main(
 
     fabric.barrier()
     save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
+    df = load_tb(output_dir=out_dir, train_config_file_name="train_config_post_init")
+    df.to_csv(str(out_dir / "tb_logs.csv"))
 
-    result_path = train_args.save_state_path / "result.yaml"
-    with result_path.open(mode="w", encoding="utf-8") as file:
-        yaml.dump(result, file)
+    if train_args.save_state_path is not None:
+        result_path = train_args.save_state_path / "result.yaml"
+        with result_path.open(mode="w", encoding="utf-8") as file:
+            yaml.dump(result, file)
 
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB")
@@ -123,7 +123,6 @@ def init_state(
     train_args: TrainConfig,
     out_dir: Path,
     save_init_state: bool = True,
-    load_model_from_path: str | Path | None = None,
 ) -> dict:
     """Initialize the state for training.
 
@@ -133,7 +132,6 @@ def init_state(
         out_dir: The output directory where the logs and checkpoints will be saved
             If `save_state_path` is not provided, the state checkpoints will be saved here
         save_init_state: Whether to save the initial state, especially the initialization weights
-        load_model_from_path: The path to load the model from (TODO: write what is different here)
 
     Returns:
         dict: The state for training
@@ -143,78 +141,64 @@ def init_state(
         train_args.logging_args.log_dir = out_dir / "logs"
 
     train_args.logging_args.start_logger()
+    # accessing this attribute here so base and delta models
+    # can be garbage collected before the target model is loaded
+    mup_base_shape = train_args.mup_base_shape
+    states: Dict[str, Any] = {"train_tokens": 0, "train_steps": 0, "torch_scheduler": train_args.lr_scheduler.scheduler}
+    states["model"] = GPT_Scales(train_args.model_config, mup_init=mup_base_shape is not None)
 
-    if load_model_from_path is None:
-        states: Dict[str, Any] = {}
-        model = GPT(train_args.model_config)
-    else:
-        if train_args.model_config_path or train_args.model_name:
-            warnings.warn(
-                "The configuration yaml in the loaded directory will be used "
-                "`model_config_file` and `model_name` are ignored"
-            )
-        states, model_path = load_checkpoint(fabric, load_model_from_path)
-        config = Config.from_file(model_path)
-        model = GPT(config)
-        train_args.lr_scheduler = states["lr_scheduler"]
-        model.load_state_dict(states["model"])
+    if mup_base_shape is not None:
+        set_base_shapes(states["model"], mup_base_shape, rescale_params=train_args.load_state_path is None)
 
-    lr_details = train_args.lr_scheduler
+    if train_args.deepseek_hparams:
+        fabric.print(f"Changing weight_init_type from {train_args.weight_init_type} to DeepSeek")
+        train_args.weight_init_type = "DeepSeek"
 
-    if lr_details is None:
-        raise ValueError("Please provide an appropriate learning rate configuration.")
-
-    model = fabric.setup(model)
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr_details.init_lr, weight_decay=train_args.weight_decay, betas=(0.9, 0.95)
+    # Note: Does not work when setting a path for base shape mup. Maybe remove the argument and use the other arg
+    initialize_weights(
+        fabric=fabric,
+        model=states["model"],
+        mup_base_scales=train_args.mup_base_scales,
+        init_type=train_args.weight_init_type,
     )
 
-    if train_args.lr_scheduler.torch_scheduler is not None:
-        torch_scheduler = train_args.lr_scheduler._instantiate_lr_scheduler(optimizer=optimizer)
+    if train_args.lr_scheduler is None:
+        raise ValueError("Please provide an appropriate learning rate configuration.")
+
+    # TODO: how to init model weights correctly
+    if train_args.mup_base_shape:
+        fabric.print("Using MuP Optimizer")
+        states["optimizer"] = MuAdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(train_args.adam_beta_1, train_args.adam_beta_2),
+            eps=train_args.adam_eps,
+        )
     else:
-        torch_scheduler = None
-    if len(states) != 0 and torch_scheduler is not None:
-        torch_scheduler.load_state_dict(states["torch_scheduler"])
+        states["optimizer"] = torch.optim.AdamW(
+            states["model"].parameters(),
+            lr=train_args.lr_scheduler.init_lr,
+            weight_decay=train_args.true_weight_decay,
+            betas=(train_args.adam_beta_1, train_args.adam_beta_2),
+            eps=train_args.adam_eps,
+        )
 
-    if len(states) != 0:
-        optimizer.load_state_dict(states["optimizer"])
-    optimizer = fabric.setup_optimizers(optimizer)
-
-    if len(states) == 0:
-        states["train_steps"] = 0
-        states["train_tokens"] = 0
+    states["model"] = fabric.setup_module(states["model"])
+    states["optimizer"] = fabric.setup_optimizers(states["optimizer"])
 
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
     if save_init_state:
-        save_checkpoint_state(
-            save_state_path=Path(train_args.save_state_path),
-            train_steps=states["train_steps"],
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=False,  # adds a step to the checkpoint name, 0 in this case
+        save_checkpoint(
+            fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
         )
 
     # load checkpoint state
-    train_steps = 0
     if train_args.load_state_path is not None:
         # load the state here
-        train_steps, model, optimizer, torch_scheduler = load_checkpoint_state(
-            load_state_path=Path(train_args.load_state_path),
-            model=model,
-            optimizer=optimizer,
-            scheduler=torch_scheduler,
-            overwrite_checkpoint=train_args.overwrite_state,
-        )
-
-    states["train_steps"] = train_steps
-    states["model"] = model
-    states["optimizer"] = optimizer
-    states["lr_scheduler"] = train_args.lr_scheduler
-    states["torch_scheduler"] = torch_scheduler
+        _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
 
     return states
 
@@ -232,7 +216,7 @@ def train(
     tokens_per_step = train_args.block_size * effective_batch_size
     accumulation_iters = train_args.accumulation_iters
 
-    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None}
+    result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None, "train_loss": None}
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
 
@@ -251,15 +235,15 @@ def train(
 
     # main training loop
     for batch in train_iterator:
-        if states["train_steps"] + 1 == train_args.train_steps:
+        is_accumulating = (loop_iters + 1) % accumulation_iters != 0
+
+        if states["train_steps"] + 1 == train_args.train_steps and not is_accumulating:
             last_step = True
         elif states["train_steps"] > train_args.train_steps:
             raise ValueError("Something unexpected during training has led to more train steps.")
 
         if loop_iters == 0:
             start_time = time.time()
-
-        is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
@@ -280,12 +264,29 @@ def train(
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
-                accumulation_iters=accumulation_iters,
                 last=last_step,
+            )
+            logger.max_attention_logits_per_layer(
+                attn_logits=file_data_share.layer_wise_max_attn_weight,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
+            )
+            logger.max_attention_logits_all(
+                attn_logits=file_data_share.layer_wise_max_attn_weight,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
             )
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
+
+            if getattr(train_args, "z_loss_eps", None) is not None:
+                # implementation from
+                # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
+                z_loss = train_args.z_loss_eps * torch.square(torch.logsumexp(logits, dim=-1)).mean()
+                loss += z_loss
             fabric.backward(loss / accumulation_iters)
             device_running_loss += loss.item() / accumulation_iters
 
@@ -302,13 +303,16 @@ def train(
                 )
             logger.total_gradient_norm(model=states["model"], step=states["train_steps"], last=last_step)
             logger.gradient_norm_per_layer(model=states["model"], step=states["train_steps"], last=last_step)
-            states["lr_scheduler"].step(
-                steps=states["train_steps"], optimizer=states["optimizer"], scheduler=states["torch_scheduler"]
-            )
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_max(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
+
             states["optimizer"].step()
+            logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
+
+            train_args.lr_scheduler.step(steps=states["train_steps"] + 1, optimizer=states["optimizer"])
             end_time = time.time()
 
             total_batch_time = fabric.all_reduce(torch.tensor(end_time - start_time), reduce_op="mean")
@@ -319,6 +323,7 @@ def train(
             avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
+            result["train_loss"] = loss.item()
             logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
@@ -350,17 +355,22 @@ def train(
         if (
             states["train_steps"] % train_args.save_state_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
-            save_checkpoint_state(
-                save_state_path=Path(str(train_args.save_state_path)),
-                train_steps=states["train_steps"],
-                model=states["model"],
-                optimizer=states["optimizer"],
-                scheduler=states["torch_scheduler"],
-                overwrite_checkpoint=train_args.overwrite_state,
-            )
-            result_path = train_args.save_state_path / "result.yaml"
-            with result_path.open(mode="w", encoding="utf-8") as file:
-                yaml.dump(result, file)
+            states["torch_scheduler"] = train_args.lr_scheduler.scheduler
+            save_checkpoint(fabric, state=states, checkpoint_dir=Path(str(train_args.save_state_path)))
+            # save_checkpoint_state(
+            #     save_state_path=Path(str(train_args.save_state_path)),
+            #     train_steps=states["train_steps"],
+            #     model=states["model"],
+            #     optimizer=states["optimizer"],
+            #     scheduler=states["torch_scheduler"],
+            #     overwrite_checkpoint=train_args.overwrite_state,
+            # )
+            if train_args.save_state_path is not None:
+                result_path = train_args.save_state_path / "result.yaml"
+                with result_path.open(mode="w", encoding="utf-8") as file:
+                    yaml.dump(result, file)
+
+        file_data_share.clear_data()
 
         if last_step is True:
             break

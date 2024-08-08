@@ -62,7 +62,7 @@ def run(
             out_dir=output_path,
             access_internet=access_internet,
         )
-    except torch.cuda.OutOfMemoryError:
+    except torch.cuda.OutOfMemoryError as e:
         # in case of a memory error bump the config to the next config group
         # Expected config parent folder name: "some_text=some_number"
         matching = re.search(r"([^=]+)=([\d]+)", str(config_path.parent.name))
@@ -75,10 +75,11 @@ def run(
             new_config_folder.mkdir(exist_ok=True)
             new_config_path = new_config_folder / config_path.name
             config_path = config_path.rename(new_config_path)
+        raise e
 
-    if pipe_updated:
-        # Write the updated yaml back
-        pipe_config.write_yaml(output_dir=config_path)
+    # if pipe_updated:
+    #     # Write the updated yaml back
+    #     pipe_config.write_yaml(output_dir=config_path)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List
 from warnings import warn
 
 import lightning as L
@@ -12,7 +12,11 @@ import torch.nn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from scales.utils import gradient_l2_norm_per_layer, total_gradient_l2_norm
+from scales.utils import (
+    gradient_l2_norm_per_layer,
+    total_gradient_l2_norm,
+    weight_spectra,
+)
 
 
 def should_log(func: Callable) -> Callable:
@@ -63,7 +67,10 @@ class LoggingArgs:
         if self.tracked_metrics and self.log_dir:
             self.writer = SummaryWriter(log_dir=self.log_dir)
             self.total_logits_mean = 0
-            self.total_logits_max = 0
+            self.max_attn_logit = None
+            self.max_attn_logits_per_layer: list[float] = []
+            self.total_logits_max = None
+            self.prev_weight_spectra: None | dict = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
         if self.suppress_all_logs:
@@ -86,15 +93,16 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Learning Rate", scalar_value=optimizer.param_groups[-1]["lr"], global_step=step)
 
     @should_log
-    def output_logits_max(
-        self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
-    ) -> None:
+    def output_logits_max(self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
         logits_max = logits.max().item()
-        self.total_logits_max += logits_max / accumulation_iters
+        if self.total_logits_max is not None:
+            self.total_logits_max = max(self.total_logits_max, logits_max)
+        else:
+            self.total_logits_max = logits_max
         if not is_accumulating:
             self.total_logits_max = fabric.all_reduce(torch.tensor(self.total_logits_max), reduce_op="max")
             self.writer.add_scalar(tag="Output Logits/Max", scalar_value=self.total_logits_max, global_step=step)
-            self.total_logits_max = 0
+            self.total_logits_max = None
 
     @should_log
     def output_logits_mean(
@@ -108,17 +116,95 @@ class LoggingArgs:
             self.total_logits_mean = 0
 
     @should_log
+    def max_attention_logits_per_layer(
+        self, attn_logits: List, step: int, fabric: L.Fabric, is_accumulating: bool
+    ) -> None:
+        if not attn_logits:
+            raise ValueError("Error happened during sharing the attn_logits from the model")
+        if not self.max_attn_logits_per_layer:
+            self.max_attn_logits_per_layer = attn_logits
+        else:
+            self.max_attn_logits_per_layer = [max(a, b) for a, b in zip(self.max_attn_logits_per_layer, attn_logits)]
+        if not is_accumulating:
+            self.max_attn_logits_per_layer = fabric.all_reduce(self.max_attn_logits_per_layer, reduce_op="max")
+            for i, logit in enumerate(self.max_attn_logits_per_layer):
+                self.writer.add_scalar(tag=f"Max Attention Logits/Layer{i}", scalar_value=logit, global_step=step)
+            self.max_attn_logits_per_layer = []
+
+    @should_log
+    def max_attention_logits_all(self, attn_logits: List, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
+        if not attn_logits:
+            raise ValueError("Error happened during sharing the attn_logits from the model")
+        if self.max_attn_logit is None:
+            self.max_attn_logit = max(attn_logits)
+        else:
+            max_between_logits = max(attn_logits)
+            self.max_attn_logit = max(max_between_logits, self.max_attn_logit)
+        if not is_accumulating:
+            self.max_attn_logit = fabric.all_reduce(self.max_attn_logit, reduce_op="max")
+            self.writer.add_scalar(tag="Max Attention Logits/All", scalar_value=self.max_attn_logit, global_step=step)
+            self.max_attn_logit = None
+
+    @should_log
+    def optimizer_stats(self, step: int, optimizer: Optimizer) -> None:
+        if isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
+            variance_l1 = 0
+            momentum_l1 = 0
+            variance_max = 0
+            for group in optimizer.param_groups:
+                for param in group["params"]:
+                    if param.grad is not None:
+                        exp_avg_sq = optimizer.state[param]["exp_avg_sq"]
+                        exp_avg = optimizer.state[param]["exp_avg"]
+                        variance_l1 += torch.norm(exp_avg_sq, p=1).item()
+                        momentum_l1 += torch.norm(exp_avg, p=1).item()
+                        variance_max = max(
+                            variance_max,
+                            abs(exp_avg_sq.max().item()),
+                            abs(exp_avg_sq.min().item()),
+                        )
+            self.writer.add_scalar(tag="Optimizer/Variance_l1", scalar_value=variance_l1, global_step=step)
+            self.writer.add_scalar(tag="Optimizer/Momentum_l1", scalar_value=momentum_l1, global_step=step)
+            self.writer.add_scalar(tag="Optimizer/Variance_max", scalar_value=variance_max, global_step=step)
+        else:
+            warn("Logging optimizer stats only works when using `Adam` or `AdamW` type optimizers")
+
+    @should_log
     def total_gradient_norm(self, model: torch.nn.Module, step: int) -> None:
         total_norm = total_gradient_l2_norm(model)
         self.writer.add_scalar(tag="Total Gradient Norm", scalar_value=total_norm, global_step=step)
 
     @should_log
-    def gradient_norm_per_layer(self, model: torch.nn.module, step: int) -> None:
+    def gradient_norm_per_layer(self, model: torch.nn.Module, step: int) -> None:
         layer_grad_norms = gradient_l2_norm_per_layer(model, step)
 
         # log to TensorBoard as separate plots
         for layer, norm in layer_grad_norms.items():
             self.writer.add_scalar(tag=f"Per-layer Gradient Norm/layer{layer}", scalar_value=norm, global_step=step)
+
+    @should_log
+    def weight_spectra_max(self, model: torch.nn.Module, step: int) -> None:
+        sv_per_layer = weight_spectra(model)
+        for name, sing_vals in sv_per_layer.items():
+            self.writer.add_scalar(tag=f"Max SV/{name}", scalar_value=torch.max(sing_vals), global_step=step)
+
+    @should_log
+    def weight_spectra_diff(self, model: torch.nn.Module, step: int) -> None:
+        if self.prev_weight_spectra is None:
+            self.prev_weight_spectra = weight_spectra(model)
+        else:
+            sv_per_layer = weight_spectra(model)
+            for name, sing_vals in sv_per_layer.items():
+                self.writer.add_scalar(
+                    tag=f"L2 diff SV/{name}",
+                    scalar_value=torch.dist(sing_vals, self.prev_weight_spectra[name], p=2),
+                    global_step=step,
+                )
+            self.prev_weight_spectra = sv_per_layer
+
+    @should_log
+    def z_loss(self, loss: float, step: int) -> None:
+        self.writer.add_scalar(tag="Z Loss", scalar_value=loss, global_step=step)
 
     @should_log
     def train_loss(self, loss: float, step: int) -> None:
