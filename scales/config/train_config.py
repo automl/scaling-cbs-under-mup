@@ -276,18 +276,6 @@ class TrainConfig(BaseConfig):
         if isinstance(self.devices, str):
             raise ValueError("`devices` is wrongly initialized and should be an in")
 
-        self.train_steps = resolve_train_steps(
-            max_tokens=self.max_tokens,
-            max_train_steps=self.max_train_steps,
-            tokens_per_param=self.tokens_per_param,
-            micro_batch_size=self.micro_batch_size,
-            block_size=self.block_size,
-            trainable_params=self.trainable_params,
-            accumulation_iters=self.accumulation_iters,
-            devices=self.devices,
-            deepseek_hparams=self.deepseek_hparams,
-        )
-
         if self.deepseek_hparams:
             model_scale = (
                 72 * self.model_config.n_layer * (self.model_config.config.n_embd**2)
@@ -312,6 +300,18 @@ class TrainConfig(BaseConfig):
             # Just a check for when the rounding is too low
             if self.accumulation_iters <= 0:
                 self.accumulation_iters = 1
+
+        self.train_steps = resolve_train_steps(
+            max_tokens=self.max_tokens,
+            max_train_steps=self.max_train_steps,
+            tokens_per_param=self.tokens_per_param,
+            micro_batch_size=self.micro_batch_size,
+            block_size=self.block_size,
+            trainable_params=self.trainable_params,
+            accumulation_iters=self.accumulation_iters,
+            devices=self.devices,
+            deepseek_hparams=self.deepseek_hparams,
+        )
 
         if self.max_lr is None:
             raise ValueError("`max_lr` should not be `None`")
