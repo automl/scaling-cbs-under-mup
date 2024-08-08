@@ -150,10 +150,11 @@ def init_state(
     if mup_base_shape is not None:
         set_base_shapes(states["model"], mup_base_shape, rescale_params=train_args.load_state_path is None)
 
+    # Note: Does not work when setting a path for base shape mup. Maybe remove the argument and use the other arg
     initialize_weights(
         fabric=fabric,
         model=states["model"],
-        mup_init=train_args.mup_base_shape is not None,
+        mup_base_scales=train_args.mup_base_scales,
         init_type=train_args.weight_init_type,
     )
 

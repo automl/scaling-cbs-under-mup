@@ -83,10 +83,14 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
 def initialize_weights(
     fabric: L.Fabric,
     model: GPT_Scales,
-    mup_init: bool = False,
+    mup_base_scales: dict[str, int] | int | None = None,
     init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None,
 ) -> None:
-    def init_weights(module: nn.Module, std: float, mup_init: bool) -> None:
+    def init_weights(
+        module: nn.Module,
+        std: float,
+        mup_init: bool,
+    ) -> None:
         if mup_init:
             mup.normal_(module.weight, mean=0.0, std=std)
         else:
@@ -96,18 +100,27 @@ def initialize_weights(
 
     if init_type == "plain" or init_type == "scaled" or init_type == "GPT-NeoX":
         # "scaled" and "plain" Weight initialization (https://arxiv.org/abs/2312.16903).
-        sigma = math.sqrt(2.0 / (5 * model.config.n_embd))
+        if isinstance(mup_base_scales, int):
+            d_model = mup_base_scales
+        elif isinstance(mup_base_scales, dict):
+            d_model = mup_base_scales["d_model"]
+        else:
+            d_model = model.config.n_embd
+        sigma = math.sqrt(2.0 / (5 * d_model))
 
         for mod in model.modules():
             if isinstance(mod, (nn.Embedding, nn.Linear)):
-                mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=mup_init)
+                mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=mup_base_scales is not None)
 
         # need a separate loop because `mod.proj` below is a `nn.Linear` too
         if init_type == "scaled":
             for mod in model.modules():
                 if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
                     mod.proj.reset_parameters = partial(
-                        init_weights, mod.proj, std=(sigma / math.sqrt(model.config.n_layer * 2)), mup_init=mup_init
+                        init_weights,
+                        mod.proj,
+                        std=(sigma / math.sqrt(model.config.n_layer * 2)),
+                        mup_init=mup_base_scales is not None,
                     )
         elif init_type == "GPT-NeoX":
             # GPT-NeoX-20B weight initialization (https://arxiv.org/abs/2204.06745).
@@ -116,8 +129,8 @@ def initialize_weights(
                     mod.proj.reset_parameters = partial(
                         init_weights,
                         mod.proj,
-                        std=(1 / math.sqrt(model.config.n_embd) / model.config.n_layer),
-                        mup_init=mup_init,
+                        std=(1 / math.sqrt(d_model) / model.config.n_layer),
+                        mup_init=mup_base_scales is not None,
                     )
 
         if not isinstance(fabric.strategy, FSDPStrategy):
