@@ -84,7 +84,7 @@ def initialize_weights(
     fabric: L.Fabric,
     model: GPT_Scales,
     mup_base_scales: dict[str, int] | int | None = None,
-    init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None,
+    init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek"] | None = None,
 ) -> None:
     def init_weights(
         module: nn.Module,
@@ -132,9 +132,15 @@ def initialize_weights(
                         std=(1 / math.sqrt(d_model) / model.config.n_layer),
                         mup_init=mup_base_scales is not None,
                     )
-
-        if not isinstance(fabric.strategy, FSDPStrategy):
-            reset_parameters(model)
-
+    elif init_type == "DeepSeek":
+        for mod in model.modules():
+            if isinstance(mod, (nn.Embedding, nn.Linear)):
+                sigma = 0.006
+                mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=False)
     else:
-        warn(f"The init_type {init_type} is not supported.")
+        fabric.print("Using standard parametrization")
+
+    if not isinstance(fabric.strategy, FSDPStrategy):
+        reset_parameters(model)
+    else:
+        warn(f"Cannot initialize network with current strategy {fabric.strategy}, using standard parametrization")

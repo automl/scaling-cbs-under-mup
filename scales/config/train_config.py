@@ -65,7 +65,8 @@ def resolve_train_steps(
     trainable_params: int | None = None,
     tokens_per_step: int | None = None,
     accumulation_iters: int = 1,
-    devices: int | str = "auto",
+    devices: int = 1,
+    deepseek_hparams: bool = True,
 ) -> int:
     """3 ways of computing train_steps...
 
@@ -83,6 +84,8 @@ def resolve_train_steps(
             f"Only one of max_train_steps={max_train_steps}, "
             f"tokens_per_param={tokens_per_param}, max_tokens={max_tokens} can be set."
         )
+    if deepseek_hparams and (max_tokens is None or tokens_per_param is None) and max_train_steps:
+        raise ValueError("When using `deepseek_hparams`, one should use either `max_tokens` or `tokens_per_param`")
 
     if max_train_steps:
         train_steps = max_train_steps
@@ -95,8 +98,6 @@ def resolve_train_steps(
                 f"when tokens_per_param={tokens_per_param} is set, trainable_params={trainable_params} "
                 f"must also be set."
             )
-
-    devices = parse_devices(devices=devices)
 
     if max_tokens:
         if tokens_per_step:
@@ -148,8 +149,6 @@ class TrainConfig(BaseConfig):
 
     """
 
-    max_lr: float
-    """The maximum Learning Rate."""
     micro_batch_size: int
     """The batch per iteration."""
     block_size: int
@@ -158,6 +157,8 @@ class TrainConfig(BaseConfig):
     """Weight Decay for AdamW optimizer."""
     max_val_steps: int
     """N of validation steps on validation data."""
+    max_lr: float | None = None
+    """The maximum Learning Rate."""
     accumulation_iters: int = 1
     """Number of accumulation iters per device."""
     devices: int | str = "auto"
@@ -170,7 +171,7 @@ class TrainConfig(BaseConfig):
     """Config Path for the Config object, ignored if model_config provided."""
     model_name: str | None = None
     """Model name to load from HF hub."""
-    weight_init_type: Literal["plain", "scaled", "GPT-NeoX"] | None = None
+    weight_init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek"] | None = None
     """Model weight initialization."""
 
     # LR scheduler
@@ -217,6 +218,11 @@ class TrainConfig(BaseConfig):
     """Dict of scaling dimension to base scale."""
     mup_base_shape_path: str | Path | None = None
     """The path of the base model shape, ."""
+
+    # DeepSeek hyperparameters
+    deepseek_hparams: bool = False
+    """Changes the learning rate, accumulation iters, and weight initialization to match deepseek's algorithm based on
+    compute."""
 
     # logging details
     tracked_metrics: dict[str, int] | None = None
@@ -265,6 +271,10 @@ class TrainConfig(BaseConfig):
         self._mup_base_shape: dict | None = None
 
         self.trainable_params = num_parameters(GPT_Scales(self.model_config), requires_grad=True)
+        self.devices = parse_devices(self.devices)
+
+        if isinstance(self.devices, str):
+            raise ValueError("`devices` is wrongly initialized and should be an in")
 
         self.train_steps = resolve_train_steps(
             max_tokens=self.max_tokens,
@@ -275,7 +285,32 @@ class TrainConfig(BaseConfig):
             trainable_params=self.trainable_params,
             accumulation_iters=self.accumulation_iters,
             devices=self.devices,
+            deepseek_hparams=self.deepseek_hparams,
         )
+
+        if self.deepseek_hparams:
+            model_scale = (
+                72 * self.model_config.n_layer * (self.model_config.config.n_embd**2)
+                + 12 * self.model_config.n_layer * self.model_config.d_model * self.model_config.block_size
+            )
+            if self.max_tokens:
+                compute = model_scale * self.max_tokens
+            elif self.tokens_per_param and self.trainable_params:
+                compute = model_scale * self.tokens_per_param * self.trainable_params
+            else:
+                raise ValueError("An error has accured during DeepSeek's compute calculation")
+
+            optim_deepseek_lr = 0.3119 * (compute**-0.125)
+            optim_deepseek_effective_batch_size = 0.2920 * (compute**0.3271)
+
+            self.max_lr = optim_deepseek_lr
+            self.accumulation_iters = round(
+                optim_deepseek_effective_batch_size
+                / (self.devices * self.micro_batch_size * self.model_config.block_size)
+            )
+
+        if self.max_lr is None:
+            raise ValueError("`max_lr` should not be `None`")
 
         self.lr_scheduler = LRScheduler(
             max_steps=self.train_steps,

@@ -11,7 +11,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 import yaml
-from litgpt.utils import CycleIterator, init_out_dir, parse_devices
+from litgpt.utils import CycleIterator, init_out_dir
 from mup import MuAdamW, set_base_shapes
 from torch.utils.data import DataLoader
 
@@ -40,14 +40,14 @@ def main(
         out_dir=out_dir,
     )
 
-    device_count = parse_devices(devices=train_args.devices)
+    device_count = train_args.devices
 
     fabric.print(f"Device count:{device_count}")
     fabric.print(f"Current strategy {fabric.strategy}")
 
     assert train_args.accumulation_iters > 0, "`accumulation_iters` should be a positive integer"
 
-    effective_batch_size = device_count * train_args.accumulation_iters * train_args.micro_batch_size
+    effective_batch_size = int(device_count * train_args.accumulation_iters * train_args.micro_batch_size)
     fabric.print(f"Effective batch size for this setup is {effective_batch_size}")
 
     micro_batch_size = train_args.micro_batch_size
@@ -149,6 +149,10 @@ def init_state(
 
     if mup_base_shape is not None:
         set_base_shapes(states["model"], mup_base_shape, rescale_params=train_args.load_state_path is None)
+
+    if train_args.deepseek_hparams:
+        fabric.print(f"Changing weight_init_type from {train_args.weight_init_type} to DeepSeek")
+        train_args.weight_init_type = "DeepSeek"
 
     # Note: Does not work when setting a path for base shape mup. Maybe remove the argument and use the other arg
     initialize_weights(
