@@ -309,6 +309,10 @@ class TrainConfig(BaseConfig):
                 / (self.devices * self.micro_batch_size * self.model_config.block_size)
             )
 
+            # Just a check for when the rounding is too low
+            if self.accumulation_iters <= 0:
+                self.accumulation_iters = 1
+
         if self.max_lr is None:
             raise ValueError("`max_lr` should not be `None`")
 
