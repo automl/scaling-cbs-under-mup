@@ -24,9 +24,24 @@ def _postprocess_data_handler(
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--output_dir", type=str, default="output", help="Output directory.")
-    parser.add_argument("--data_config_path", type=str, required=True, help="Data configuration file.")
-    parser.add_argument("--train_config_path", type=str, required=True, help="Training configuration file.")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="output",
+        help="Output directory."
+    )
+    parser.add_argument(
+        "--data_config_path",
+        type=str,
+        required=True,
+        help="Data configuration file."
+    )
+    parser.add_argument(
+        "--train_config_path",
+        type=str,
+        required=True,
+        help="Training configuration file."
+    )
 
     return parser.parse_args()
 
@@ -37,19 +52,28 @@ if __name__ == "__main__":
     output_dir = Path(__file__).parent / args.output_dir
 
     # Loading the training configuration
-    assert Path(args.train_config_path).exists(), f"Configuration file {args.train_config_path} does not exist!"
+    assert Path(args.train_config_path).exists(), \
+        f"Configuration file {args.train_config_path} does not exist!"
     train_config = TrainConfig.from_path(args.train_config_path)
     train_config.log_dir = Path(args.output_dir) / "logs"
 
     # Load the data configuration
-    assert Path(args.data_config_path).exists(), f"Configuration file {args.data_config_path} does not exist!"
+    assert Path(args.data_config_path).exists(), \
+        f"Configuration file {args.data_config_path} does not exist!"
     data_config = DataHandler.from_path(args.data_config_path)
-    data_config = _postprocess_data_handler(data_config, None, train_config.seed, train_config.block_size)
+    data_config = _postprocess_data_handler(
+        data_config, None, train_config.seed, train_config.block_size
+    )
 
     pprint(data_config)
     pprint(train_config)
 
     fabric = L.Fabric(devices="auto", strategy="auto")
-    result_dict = main(fabric=fabric, data=data_config, train_args=train_config, out_dir=Path(args.output_dir))
+    result_dict = main(
+        fabric=fabric,
+        data=data_config,
+        train_args=train_config,
+        out_dir=Path(args.output_dir)
+    )
 
 # end of file
