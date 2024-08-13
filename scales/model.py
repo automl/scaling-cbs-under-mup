@@ -141,7 +141,7 @@ def initialize_weights(
     elif init_type == "DeepSeek":
         for mod in model.modules():
             if isinstance(mod, (nn.Embedding, nn.Linear)):
-                sigma = 0.006
+                sigma = 0.006  # TODO: mention source
                 mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=False)
     else:
         fabric.print("Using standard parametrization")
