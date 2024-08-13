@@ -224,6 +224,7 @@ def train(
     device_running_loss = 0
     cumulative_time = 0
     last_step = False
+    exit_loop = False
 
     # wait for all processes
     fabric.barrier()
@@ -237,10 +238,8 @@ def train(
     for batch in train_iterator:
         is_accumulating = (loop_iters + 1) % accumulation_iters != 0
 
-        if states["train_steps"] + 1 == train_args.train_steps and not is_accumulating:
+        if states["train_steps"] + 1 >= train_args.train_steps:
             last_step = True
-        elif states["train_steps"] > train_args.train_steps:
-            raise ValueError("Something unexpected during training has led to more train steps.")
 
         if loop_iters == 0:
             start_time = time.time()
@@ -271,12 +270,14 @@ def train(
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
+                last=last_step,
             )
             logger.max_attention_logits_all(
                 attn_logits=file_data_share.layer_wise_max_attn_weight,
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
+                last=last_step,
             )
             logits = logits.reshape(-1, logits.size(-1))
             targets = targets.reshape(-1)
@@ -332,6 +333,8 @@ def train(
             states["train_steps"] += 1
             device_running_loss = 0
             loop_iters = 0
+            if last_step is True:
+                exit_loop = True
         else:
             loop_iters += 1
 
@@ -372,7 +375,7 @@ def train(
 
         file_data_share.clear_data()
 
-        if last_step is True:
+        if exit_loop is True:
             break
     # end of training loop
     logger.close()
