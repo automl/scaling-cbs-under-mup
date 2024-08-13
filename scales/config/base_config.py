@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 from functools import partial
 from pathlib import Path
 from types import FunctionType
-from typing import Any, TypeVar, Callable
+from typing import Any, Callable, TypeVar
 
 import yaml
 

@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 import os
+from pathlib import Path
 
-def create_slurm_script(folder_path: str, 
-                        partition: str, 
-                        max_time: str, 
-                        job_name: str, 
-                        gpu_per_job: int, 
-                        results_path: str) -> Path:
-    """
-    Create a slurm script to run all the configs in the folder_path. 
-    The generated script will be saved in the results_path/submit.
-    
+
+def create_slurm_script(
+    folder_path: str, partition: str, max_time: str, job_name: str, gpu_per_job: int, results_path: str
+) -> Path:
+    """Create a slurm script to run all the configs in the folder_path. The generated script will be saved in the
+    results_path/submit.
+
     Note: This function will not submit the job itself, but will return the path to the script.
 
     Args:
@@ -22,15 +19,16 @@ def create_slurm_script(folder_path: str,
         job_name (str): The name of the job
         gpu_per_job (int): The number of GPUs per job
         results_path (str): The path to the results folder
+
     """
-    
+
     folder_path = Path(folder_path)
     results_path = Path(results_path)
     log_path = results_path / "logs"
     script_folder = results_path / "submit"
     results_folder = results_path / "results"
     config_paths = []
-    
+
     python_path = "examples/run.py"
     data_root = "/work/dlclarge1/garibovs-scales_n_arp/scaling_all_the_way/data"
     # Get all the config files in the folder
@@ -39,13 +37,15 @@ def create_slurm_script(folder_path: str,
             continue
         if file.suffix == ".yaml":
             config_paths.append(str(file))
-    
+
     # Create the array of config paths
     array_str = f"AR=({' '.join(config_paths)})"
 
     # Create the command to run the python script
-    command = f"poetry run python {python_path} ${{AR[$SLURM_ARRAY_TASK_ID]}} {results_folder} --data_root_path={data_root}"
-    
+    command = (
+        f"poetry run python {python_path} ${{AR[$SLURM_ARRAY_TASK_ID]}} {results_folder} --data_root_path={data_root}"
+    )
+
     log_path.mkdir(parents=True, exist_ok=True)
     script_folder.mkdir(parents=True, exist_ok=True)
     results_folder.mkdir(parents=True, exist_ok=True)
@@ -73,6 +73,7 @@ def create_slurm_script(folder_path: str,
     with script_path.open("w") as f:
         f.write("\n".join(slurm_script))
     return script_path
+
 
 if __name__ == "__main__":
     folder_path = "/work/dlclarge1/garibovs-scales_n_arp/configs/neps_selected/run=1"

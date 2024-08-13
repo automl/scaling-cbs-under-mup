@@ -8,12 +8,12 @@ from typing import Any
 import lightning as L
 import neps
 from jsonargparse import CLI
+from neps.plot.tensorboard_eval import tblogger
 
 from scales.config import DataHandler, TrainConfig
 from scales.config.ConfigWrapper import ConfigWrapper
 from scales.config.utils import preprocess_wikitext
 from scales.refactored_pretrain import main
-from neps.plot.tensorboard_eval import tblogger
 
 
 def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 449) -> None:
@@ -75,16 +75,18 @@ def launch_neps(root_dir: Path | str, data_dir: Path | str, seed: int = 449) -> 
         output_dir.mkdir(exist_ok=True)
 
         config_name = pipeline_directory.name
-        train_conf.write_yaml(output_dir / f"train_config.yaml", ignore_defaults=False)
-        data.write_yaml(output_dir / f"data_config.yaml", ignore_defaults=False)
+        train_conf.write_yaml(output_dir / "train_config.yaml", ignore_defaults=False)
+        data.write_yaml(output_dir / "data_config.yaml", ignore_defaults=False)
 
         result_dict = main(fabric=fabric, data=data, train_args=train_conf, out_dir=output_dir)
 
-        tblogger.log(loss=result_dict["val_loss"],
-                     current_epoch=1,
-                     writer_config_hparam=True,
-                     write_summary_incumbent=False,
-                     writer_config_scalar=False)
+        tblogger.log(
+            loss=result_dict["val_loss"],
+            current_epoch=1,
+            writer_config_hparam=True,
+            write_summary_incumbent=False,
+            writer_config_scalar=False,
+        )
 
         return result_dict["val_loss"]
 

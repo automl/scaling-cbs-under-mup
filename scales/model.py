@@ -25,6 +25,12 @@ class file_data_share:
 
 
 class GPT_Scales(GPT):
+    """Overloading of the LitGPT class to use muP.
+
+    Following instructions from https://github.com/microsoft/mup?tab=readme-ov-file#basic-usage
+
+    """
+
     def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
         if mup_init:

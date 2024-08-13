@@ -5,30 +5,34 @@ from typing import Any
 
 from scales.config import PipelineConfig
 
-def change_load_state_path(config: PipelineConfig, config_path: Path,
-                           output_root_folder: Path | str | None) -> PipelineConfig:
+
+def change_load_state_path(
+    config: PipelineConfig, config_path: Path, output_root_folder: Path | str | None
+) -> PipelineConfig:
     if output_root_folder is None:
         config.train_config.load_state_path = None  # type: ignore
         return config
-    
+
     if isinstance(output_root_folder, str):
         output_root_folder = Path(output_root_folder)
     out_path = output_root_folder / config_path.stem
     config.train_config.load_state_path = out_path  # type: ignore
     return config
 
-def change_dataset(config: PipelineConfig,
-                   hf_dataset_id: str = "",
-                   hf_data_subset_name: str = ""):
+
+def change_dataset(config: PipelineConfig, hf_dataset_id: str = "", hf_data_subset_name: str = ""):
     config.data_config.hf_dataset_id = hf_dataset_id
     config.data_config.hf_data_subset_name = hf_data_subset_name
     return config
 
-def change_logging(config: PipelineConfig,
-                   global_log_step: int = 1,
-                   tracked_metrics: dict[str, int] = {},
-                   log_dir: str | Path | None = None,
-                   suppress_all_logs: bool = False):
+
+def change_logging(
+    config: PipelineConfig,
+    global_log_step: int = 1,
+    tracked_metrics: dict[str, int] = {},
+    log_dir: str | Path | None = None,
+    suppress_all_logs: bool = False,
+):
     config.train_config.global_log_step = global_log_step
     config.train_config.tracked_metrics = tracked_metrics
     config.train_config.log_dir = log_dir
@@ -36,21 +40,25 @@ def change_logging(config: PipelineConfig,
     config.train_config.save_state_every = 1000
     return config
 
-def change_lr_to_const(config: PipelineConfig,
-                       cooldown_type: str = "rsqrt",
-                       cooldown_fraction: float = 0.2,
-                       scale_lr: bool = False,
-                       scale_warmup: bool = False):
+
+def change_lr_to_const(
+    config: PipelineConfig,
+    cooldown_type: str = "rsqrt",
+    cooldown_fraction: float = 0.2,
+    scale_lr: bool = False,
+    scale_warmup: bool = False,
+):
     config.train_config.torch_scheduler = None
     config.train_config.torch_scheduler_args = None
     if scale_lr:
         config.train_config.max_lr = config.train_config.max_lr / 2
     if scale_warmup:
         config.train_config.warmup_fraction = config.train_config.warmup_fraction * 2
-    
+
     config.train_config.cooldown_type = cooldown_type
     config.train_config.cooldown_fraction = cooldown_fraction
     return config
+
 
 def collect_configs(configs_folder: Path | None = None, config_pathes: list[Path] | None = None) -> list[Path]:
     config_pathes = [] if config_pathes is None else config_pathes
@@ -62,6 +70,7 @@ def collect_configs(configs_folder: Path | None = None, config_pathes: list[Path
         return configs
     return config_pathes
 
+
 def convert_to_new_train_args_hook(config: dict) -> dict:
     if "init_lr" in config:
         config["max_lr"] = config.pop("init_lr")
@@ -70,8 +79,11 @@ def convert_to_new_train_args_hook(config: dict) -> dict:
         config["warmup_fraction"] = n_warmup_steps / config["max_train_steps"] if n_warmup_steps is not None else 0
     if "n_cooldown_steps" in config:
         n_cooldown_steps = config.pop("n_cooldown_steps")
-        config["cooldown_fraction"] = n_cooldown_steps / config["max_train_steps"] if n_cooldown_steps is not None else 0
+        config["cooldown_fraction"] = (
+            n_cooldown_steps / config["max_train_steps"] if n_cooldown_steps is not None else 0
+        )
     return config
+
 
 def load_config(config_path: Path) -> PipelineConfig:
     # TODO: Load all types of yaml config files we support here
@@ -113,9 +125,7 @@ def modify_configs(
 
 if __name__ == "__main__":
     # Hardcode your modification here
-    configs_folder: Path | None = Path(
-        "/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/run=1"
-    )
+    configs_folder: Path | None = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/run=1")
     # configs_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_selected/run=1")
     config_pathes: list[Path] | None = None
     output_root_folder: Path | None = Path(
@@ -124,18 +134,22 @@ if __name__ == "__main__":
     # copy_to_folder: Path | None = "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
     output_root_folder = None
     copy_to_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/const_lr_no_lr_scale_n_decay_run=1")
-    modify_configs(configs_folder, config_pathes, 
-                #    output_root_folder=output_root_folder, 
-                tracked_metrics={"learning_rate": 1, 
-                                 "train_loss": 1, 
-                                 "output_logits_max": 10,
-                                 "output_logits_mean": 10,
-                                 "max_attention_logits_per_layer": 10,
-                                 "max_attention_logits_all": 10,
-                                 "total_gradient_norm": 20,
-                                 "gradient_norm_per_layer": 20,
-                                 "validation_loss": 5,},
-                   copy_to_folder=copy_to_folder,
-                   hf_dataset_id="DKYoon/SlimPajama-6B",
-                   hf_data_subset_name=""
-                   )
+    modify_configs(
+        configs_folder,
+        config_pathes,
+        #    output_root_folder=output_root_folder,
+        tracked_metrics={
+            "learning_rate": 1,
+            "train_loss": 1,
+            "output_logits_max": 10,
+            "output_logits_mean": 10,
+            "max_attention_logits_per_layer": 10,
+            "max_attention_logits_all": 10,
+            "total_gradient_norm": 20,
+            "gradient_norm_per_layer": 20,
+            "validation_loss": 5,
+        },
+        copy_to_folder=copy_to_folder,
+        hf_dataset_id="DKYoon/SlimPajama-6B",
+        hf_data_subset_name="",
+    )

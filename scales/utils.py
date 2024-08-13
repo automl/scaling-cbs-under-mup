@@ -9,9 +9,12 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
+from litgpt.config import Config
 from litgpt.utils import save_config
+from mup import get_shapes, make_base_shapes
 
 from scales.lr_utils import LRScheduler
+from scales.model import GPT_Scales
 
 
 def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path, train_step: int | None = None) -> None:
@@ -120,3 +123,93 @@ def weight_spectra(model: nn.Module) -> dict:
             singular_vals = torch.linalg.svdvals(mod.weight.data).detach()
             singular_val_per_layer[name] = singular_vals
     return singular_val_per_layer
+
+
+def get_mup_shape_diff(base_config: Config, target_config: Config, output_file: Path, verbose: bool = False) -> None:
+    """Get the shape difference between two models with different scaling dimensions for muP.
+
+    Refer to the `../examples/save_model_base_shape.py` script for more details.
+
+    """
+    base_model = get_shapes(GPT_Scales(base_config, mup_init=True))
+    delta_model = get_shapes(GPT_Scales(target_config, mup_init=True))
+    make_base_shapes(base_model, delta_model, output_file)
+    print(f"Scaling shape saved to {output_file.absolute()}!")
+
+    if verbose:
+        print(
+            "\nNumber of base:target parameters (Kaplan): "
+            f"{count_trainable_parameters_kaplan(GPT_Scales(base_config, mup_init=True)) / 1e6}M:"
+            f"{count_trainable_parameters_chinchilla(GPT_Scales(target_config, mup_init=True)) / 1e6}M"
+        )
+        print(
+            "\nNumber of base:target parameters (Chinchilla): "
+            f"{count_trainable_parameters_kaplan(GPT_Scales(base_config, mup_init=True)) / 1e6}M:"
+            f"{count_trainable_parameters_chinchilla(GPT_Scales(target_config, mup_init=True)) / 1e6}M"
+        )
+
+
+def count_trainable_parameters_kaplan(model):
+    """Count the number of parameters in a PyTorch model using the Kaplan approach.
+
+    In the Kaplan et al. paper "Scaling Laws for Neural Language Models",
+    they count all parameters in the model, including embeddings.
+
+    NOTE: Generated from Claude 3.5 Sonnet on August 13, 2024.
+
+    Args:
+    model (nn.Module): PyTorch model
+
+    Returns:
+    int: Total number of parameters
+
+    """
+    # TODO: verify code
+
+    return sum(p.numel() for p in model.parameters())
+
+
+def count_trainable_parameters_chinchilla(
+    model: nn.Module, return_all: bool = False, verbose: bool = False
+) -> int | tuple[int, int]:
+    """Count the number of parameters in a PyTorch model using an interpretation of the Chinchilla approach.
+
+    Based on the Hoffmann et al. paper "Training Compute-Optimal Large Language Models",
+    this function attempts to exclude embedding parameters. However, the exact definition
+    of what constitutes "embedding parameters" may vary depending on the model architecture.
+
+    NOTE: Generated from Claude 3.5 Sonnet on August 13, 2024.
+
+    Args:
+    model (nn.Module): PyTorch model
+
+    Returns:
+    int: Estimated number of non-embedding parameters
+    or
+    tuple[int, int]: Total number of parameters and embedding parameters
+
+    """
+    # TODO: verify code
+
+    def is_embedding_like(module):
+        return isinstance(module, (nn.Embedding, nn.EmbeddingBag))
+
+    total_params = 0
+    embedding_params = 0
+
+    for name, module in model.named_modules():
+        if len(list(module.children())) == 0:  # it's a leaf module
+            module_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
+            if is_embedding_like(module):
+                embedding_params += module_params
+            else:
+                total_params += module_params
+
+    if verbose:
+        print(f"Total parameters: {total_params + embedding_params}")
+        print(f"Embedding parameters: {embedding_params}")
+        print(f"Non-embedding parameters: {total_params}")
+
+    if return_all:
+        return total_params, embedding_params
+    return embedding_params
