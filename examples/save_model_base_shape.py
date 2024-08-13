@@ -4,7 +4,7 @@ from pathlib import Path
 
 from litgpt.config import Config
 
-from scales.utils import get_mup_shape_diff
+from scales.utils import get_mup_shape_base
 
 
 def get_args():
@@ -52,4 +52,4 @@ if __name__ == "__main__":
     assert Path(args.output_dir).exists(), f"Output directory {args.output_dir} does not exist"
     output_file = Path(args.output_dir) / args.filename
     # Get model shapes
-    get_mup_shape_diff(base_config, target_config, output_file, verbose=True)
+    get_mup_shape_base(base_config, target_config, output_file, verbose=True)

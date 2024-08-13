@@ -34,12 +34,9 @@ def get_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = get_args()
 
-    output_dir = Path(__file__).parent / args.output_dir
-
     # Loading the training configuration
     assert Path(args.train_config_path).exists(), f"Configuration file {args.train_config_path} does not exist!"
     train_config = TrainConfig.from_path(args.train_config_path)
-    train_config.log_dir = Path(args.output_dir) / "logs"
 
     # Load the data configuration
     assert Path(args.data_config_path).exists(), f"Configuration file {args.data_config_path} does not exist!"

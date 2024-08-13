@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from litgpt.config import Config
-from litgpt.utils import save_config
+from litgpt.utils import num_parameters, save_config
 from mup import get_shapes, make_base_shapes
 
 from scales.lr_utils import LRScheduler
@@ -125,7 +125,12 @@ def weight_spectra(model: nn.Module) -> dict:
     return singular_val_per_layer
 
 
-def get_mup_shape_diff(base_config: Config, target_config: Config, output_file: Path, verbose: bool = False) -> None:
+def get_mup_shape_base(
+    base_config: Config,
+    target_config: Config,
+    output_file: Path,
+    verbose: bool = False
+) -> None:
     """Get the shape difference between two models with different scaling dimensions for muP.
 
     Refer to the `../examples/save_model_base_shape.py` script for more details.
@@ -133,19 +138,25 @@ def get_mup_shape_diff(base_config: Config, target_config: Config, output_file: 
     """
     base_model = get_shapes(GPT_Scales(base_config, mup_init=True))
     delta_model = get_shapes(GPT_Scales(target_config, mup_init=True))
+    if isinstance(output_file, str):
+        output_file = Path(output_file)
     make_base_shapes(base_model, delta_model, output_file)
     print(f"Scaling shape saved to {output_file.absolute()}!")
-
     if verbose:
         print(
             "\nNumber of base:target parameters (Kaplan): "
             f"{count_trainable_parameters_kaplan(GPT_Scales(base_config, mup_init=True)) / 1e6}M:"
-            f"{count_trainable_parameters_chinchilla(GPT_Scales(target_config, mup_init=True)) / 1e6}M"
+            f"{count_trainable_parameters_kaplan(GPT_Scales(target_config, mup_init=True)) / 1e6}M"
         )
         print(
             "\nNumber of base:target parameters (Chinchilla): "
-            f"{count_trainable_parameters_kaplan(GPT_Scales(base_config, mup_init=True)) / 1e6}M:"
+            f"{count_trainable_parameters_chinchilla(GPT_Scales(base_config, mup_init=True)) / 1e6}M:"
             f"{count_trainable_parameters_chinchilla(GPT_Scales(target_config, mup_init=True)) / 1e6}M"
+        )
+        print(
+            "\nNumber of base:target parameters (LitGPT): "
+            f"{num_parameters(GPT_Scales(base_config, mup_init=True), requires_grad=True) / 1e6}M:"
+            f"{num_parameters(GPT_Scales(target_config, mup_init=True), requires_grad=True) / 1e6}M"
         )
 
 
