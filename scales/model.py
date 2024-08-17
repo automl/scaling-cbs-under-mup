@@ -58,12 +58,6 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
     def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
         self.mup_init = mup_init
-        self.q_norm, self.k_norm = (
-            config.norm_class(self.config.head_size * self.config.n_head, eps=config.norm_eps),
-            config.norm_class(self.config.head_size * self.config.n_query_groups, eps=config.norm_eps)
-            if hasattr(config, "apply_qk_norm") and config.apply_qk_norm
-            else False,
-        )
         if hasattr(config, "apply_qk_norm") and config.apply_qk_norm:
             self.q_norm = config.norm_class(self.config.head_size * self.config.n_head, eps=config.norm_eps)
             self.k_norm = config.norm_class(self.config.head_size * self.config.n_query_groups, eps=config.norm_eps)
