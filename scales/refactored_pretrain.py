@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Any, Dict
+from warnings import warn
 
 import lightning as L
 import torch
@@ -122,7 +123,6 @@ def init_state(
     fabric: L.Fabric,
     train_args: TrainConfig,
     out_dir: Path,
-    save_init_state: bool = True,
 ) -> dict:
     """Initialize the state for training.
 
@@ -131,7 +131,6 @@ def init_state(
         train_args: The training configuration
         out_dir: The output directory where the logs and checkpoints will be saved
             If `save_state_path` is not provided, the state checkpoints will be saved here
-        save_init_state: Whether to save the initial state, especially the initialization weights
 
     Returns:
         dict: The state for training
@@ -165,7 +164,6 @@ def init_state(
     if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
 
-    # TODO: how to init model weights correctly
     if train_args.mup_base_shape:
         fabric.print("Using MuP Optimizer")
         states["optimizer"] = MuAdamW(
@@ -190,7 +188,7 @@ def init_state(
     if train_args.save_state_path is None:
         train_args.save_state_path = out_dir
 
-    if save_init_state:
+    if train_args.save_init_state:
         save_checkpoint(
             fabric, state=states, train_step=states["train_steps"], checkpoint_dir=Path(train_args.save_state_path)
         )
@@ -198,7 +196,12 @@ def init_state(
     # load checkpoint state
     if train_args.load_state_path is not None:
         # load the state here
-        _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
+        try:
+            _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
+        except FileNotFoundError:
+            warn(f"The path {train_args.load_state_path} does not exist, no checkpoint running")
+        except Exception as e:
+            warn(f"An error occurred while loading the checkpoint: {e}")
 
     return states
 

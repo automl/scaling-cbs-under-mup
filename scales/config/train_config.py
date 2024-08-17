@@ -257,6 +257,9 @@ class TrainConfig(BaseConfig):
 
     """
 
+    save_init_state: bool = True
+    """Whether to save the initial state, especially the initialization weights."""
+
     def __post_init__(self) -> None:
         super().__post_init__()
         self.save_state_every = self.validate_every if self.save_state_every is None else self.save_state_every
