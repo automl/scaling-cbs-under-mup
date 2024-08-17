@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass, fields
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from litgpt.config import Config
 
@@ -22,6 +22,8 @@ class ConfigWrapper(BaseConfig):
     block_size: int = 1024
     vocab_size: int = 50257
     bias: bool = True
+    apply_qk_norm: bool = False
+    norm_class_name: Literal["LayerNorm", "RMSNorm"] = "LayerNorm"
     lm_head_bias: bool = False
     _initialized: bool = False
 
@@ -32,6 +34,7 @@ class ConfigWrapper(BaseConfig):
             n_layer=self.n_layer,
             block_size=self.block_size,
             vocab_size=self.vocab_size,
+            norm_class_name=self.norm_class_name,
             bias=self.bias,
             lm_head_bias=self.lm_head_bias,
         )

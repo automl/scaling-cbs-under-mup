@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from lightning.fabric.strategies import FSDPStrategy
 from litgpt.config import Config
-from litgpt.model import GPT, Block, CausalSelfAttention, GptNeoxMLP, LLaMAMLP
+from litgpt.model import GPT, Block, CausalSelfAttention, GptNeoxMLP, KVCache, LLaMAMLP, apply_rope
 from litgpt.pretrain import reset_parameters
 from mup import MuReadout
 
@@ -58,6 +58,75 @@ class CausalSelfAttention_Scales(CausalSelfAttention):
     def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
         self.mup_init = mup_init
+        self.q_norm, self.k_norm = (
+            config.norm_class(self.config.head_size * self.config.n_head, eps=config.norm_eps),
+            config.norm_class(self.config.head_size * self.config.n_query_groups, eps=config.norm_eps)
+            if hasattr(config, "apply_qk_norm") and config.apply_qk_norm
+            else False,
+        )
+        if hasattr(config, "apply_qk_norm") and config.apply_qk_norm:
+            self.q_norm = config.norm_class(self.config.head_size * self.config.n_head, eps=config.norm_eps)
+            self.k_norm = config.norm_class(self.config.head_size * self.config.n_query_groups, eps=config.norm_eps)
+        else:
+            self.q_norm = nn.Identity()
+            self.k_norm = nn.Identity()
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        input_pos: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        B, T, _ = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
+
+        qkv = self.attn(x)
+
+        # assemble into a number of query groups to support MHA, MQA and GQA together (see `config.n_query_groups`)
+        q_per_kv = self.config.n_head // self.config.n_query_groups
+        total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
+        qkv = qkv.view(B, T, self.config.n_query_groups, total_qkv, self.config.head_size)
+        qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, hs)
+
+        # split batched computation into three
+        q, k, v = qkv.split((q_per_kv, 1, 1), dim=2)
+
+        # maybe repeat k and v if for the non multi-head attention cases
+        # training: flash attention requires it
+        # inference: multi-query would require a full kv cache so avoid it to limit its memory usage
+        if self.config.n_query_groups != self.config.n_head and (input_pos is None or self.config.n_query_groups != 1):
+            k = k.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
+            v = v.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
+
+        q = q.reshape(B, -1, T, self.config.head_size)  # (B, nh_q, T, hs)
+        k = k.reshape(B, -1, T, self.config.head_size)  # (B, nh_k, T, hs)
+        v = v.reshape(B, -1, T, self.config.head_size)  # (B, nh_v, T, hs)
+
+        # reshape and apply qk_norm if set
+        q = self.q_norm(q.permute(0, 2, 1, 3).reshape(B, T, -1))  # (B, T, nh_q * head_size)
+        k = self.k_norm(k.permute(0, 2, 1, 3).reshape(B, T, -1))  # (B, T, nh_k * head_size)
+
+        # reshape back to original shape
+        q = q.reshape(B, T, -1, self.config.head_size).permute(0, 2, 1, 3)  # (B, nh_q, T, hs)
+        k = k.reshape(B, T, -1, self.config.head_size).permute(0, 2, 1, 3)  # (B, nh_k, T, hs)
+
+        q_roped = apply_rope(q[..., : self.config.rope_n_elem], cos, sin)
+        k_roped = apply_rope(k[..., : self.config.rope_n_elem], cos, sin)
+        q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
+        k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
+
+        if input_pos is not None:
+            if not isinstance(self.kv_cache, KVCache):
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            k, v = self.kv_cache(input_pos, k, v)
+
+        y = self.scaled_dot_product_attention(q, k, v, mask)
+
+        y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
+
+        # output projection
+        return self.proj(y)
 
     def scaled_dot_product_attention(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: Optional[torch.Tensor] = None
