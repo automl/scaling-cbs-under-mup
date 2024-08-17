@@ -154,12 +154,13 @@ def init_state(
         train_args.weight_init_type = "DeepSeek"
 
     # Note: Does not work when setting a path for base shape mup. Maybe remove the argument and use the other arg
-    initialize_weights(
-        fabric=fabric,
-        model=states["model"],
-        mup_base_scales=train_args.mup_base_scales,
-        init_type=train_args.weight_init_type,
-    )
+    if not train_args.mup_base_shape_path:
+        initialize_weights(
+            fabric=fabric,
+            model=states["model"],
+            mup_base_scales=train_args.mup_base_scales,
+            init_type=train_args.weight_init_type,
+        )
 
     if train_args.lr_scheduler is None:
         raise ValueError("Please provide an appropriate learning rate configuration.")
