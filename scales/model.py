@@ -9,7 +9,15 @@ import torch
 import torch.nn as nn
 from lightning.fabric.strategies import FSDPStrategy
 from litgpt.config import Config
-from litgpt.model import GPT, Block, CausalSelfAttention, GptNeoxMLP, KVCache, LLaMAMLP, apply_rope
+from litgpt.model import (
+    GPT,
+    Block,
+    CausalSelfAttention,
+    GptNeoxMLP,
+    KVCache,
+    LLaMAMLP,
+    apply_rope,
+)
 from litgpt.pretrain import reset_parameters
 from mup import MuReadout
 
@@ -209,7 +217,7 @@ def initialize_weights(
     else:
         fabric.print("Using standard parametrization")
 
-    if not isinstance(fabric.strategy, FSDPStrategy):
+    if not isinstance(fabric.strategy, FSDPStrategy) and init_type:
         reset_parameters(model)
     else:
         warn(f"Cannot initialize network with current strategy {fabric.strategy}, using standard parametrization")

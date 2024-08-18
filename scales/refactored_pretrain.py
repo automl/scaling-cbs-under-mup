@@ -372,7 +372,7 @@ def train(
             #     scheduler=states["torch_scheduler"],
             #     overwrite_checkpoint=train_args.overwrite_state,
             # )
-            if train_args.save_state_path is not None:
+            if train_args.save_state_path is not None and fabric.global_rank == 0:
                 result_path = train_args.save_state_path / "result.yaml"
                 with result_path.open(mode="w", encoding="utf-8") as file:
                     yaml.dump(result, file)
