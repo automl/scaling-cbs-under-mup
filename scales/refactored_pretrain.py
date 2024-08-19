@@ -229,7 +229,7 @@ def train(
 
     loop_iters = 0
     device_running_loss = 0
-    cumulative_time = 0
+    cumulative_throughput = 0
     last_step = False
     exit_loop = False
 
@@ -321,21 +321,24 @@ def train(
             states["train_tokens"] += tokens_per_step
 
             train_args.lr_scheduler.step(steps=states["train_steps"] + 1, optimizer=states["optimizer"])
-            end_time = time.time()
 
-            total_batch_time = fabric.all_reduce(torch.tensor(end_time - start_time), reduce_op="mean")
-            current_throughput = tokens_per_step / total_batch_time
-
-            cumulative_time += total_batch_time
-            avg_batch_time = cumulative_time / (states["train_steps"] + 1)
-            avg_throughput = tokens_per_step / avg_batch_time
             # get the mean loss from all devices
             loss = fabric.all_reduce(torch.tensor(device_running_loss), reduce_op="mean")
             result["train_loss"] = loss.item()
             logger.train_loss(loss=loss, step=states["train_steps"], last=last_step)
+
+            end_time = time.time()
+
+            thourghput_per_device = tokens_per_step / (end_time - start_time)
+            total_throughput = fabric.all_reduce(torch.tensor(thourghput_per_device), reduce_op="sum")
+
+            cumulative_throughput += total_throughput
+            average_throughput = cumulative_throughput / (states["train_steps"] + 1)
+            result["average_throughput"] = average_throughput.item()
+
             fabric.print(
                 f"Train Step {states['train_steps']} - Tokens {states['train_tokens']} - Total Loss {loss.item()}"
-                f" - Current Throughput {current_throughput} - Avg Throughput {avg_throughput}"
+                f" - Current Throughput {total_throughput} - Average Throughput {average_throughput}"
             )
             states["train_steps"] += 1
             device_running_loss = 0
