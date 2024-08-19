@@ -81,11 +81,12 @@ def main(
             "block_size": train_args.block_size,
         },
     }
-    with open(out_dir / "info.yaml", "w") as f:
-        yaml.dump(_info, f)
+    if fabric.global_rank == 0:
+        with open(out_dir / "info.yaml", "w") as f:
+            yaml.dump(_info, f)
 
-    # Note, this train_args is NOT the same as the one passed to the function
-    train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
+        # Note, this train_args is NOT the same as the one passed to the function
+        train_args.write_yaml(out_dir / "train_config_post_init.yaml", ignore_defaults=False)
 
     train_time = time.time()
 
@@ -104,11 +105,13 @@ def main(
     fabric.print(f"The average training time is {(avg_train_time):.3f}s")
 
     fabric.barrier()
-    save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
-    df = load_tb(output_dir=out_dir, train_config_file_name="train_config_post_init")
-    df.to_csv(str(out_dir / "tb_logs.csv"))
 
-    if train_args.save_state_path is not None:
+    save_checkpoint(fabric=fabric, state=states, checkpoint_dir=out_dir)
+    if fabric.global_rank == 0:
+        df = load_tb(output_dir=out_dir, train_config_file_name="train_config_post_init")
+        df.to_csv(str(out_dir / "tb_logs.csv"))
+
+    if train_args.save_state_path is not None and fabric.global_rank == 0:
         result_path = train_args.save_state_path / "result.yaml"
         with result_path.open(mode="w", encoding="utf-8") as file:
             yaml.dump(result, file)
