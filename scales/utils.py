@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -17,13 +18,24 @@ from scales.lr_utils import LRScheduler
 from scales.model import GPT_Scales
 
 
-def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path, train_step: int | None = None) -> None:
+def save_checkpoint(
+    fabric: L.Fabric,
+    state: dict,
+    checkpoint_dir: str | Path,
+    train_step: int | None = None,
+    recovery_state: bool = False,
+    last_step: bool = False,
+) -> None:
     checkpoint_name = "lit_model.pth"
     if train_step is not None:
         checkpoint_name = f"lit_model_{train_step}.pth"
     checkpoint_dir = Path(checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     fabric.print(f"Saving state to {str(checkpoint_dir)}")
+    if fabric.global_rank == 0 and recovery_state and os.path.exists(Path(checkpoint_dir / checkpoint_name)):
+        os.rename(Path(checkpoint_dir / checkpoint_name), Path(checkpoint_dir / "lit_model_recovery.pth"))
+    if fabric.global_rank == 0 and last_step and recovery_state:
+        os.remove(Path(checkpoint_dir / "lit_model_recovery.pth"))
     # This will save all torch related artifacts with their state_dict
     fabric.save(Path(checkpoint_dir / checkpoint_name), state)
     # TODO: save random state
@@ -33,13 +45,19 @@ def save_checkpoint(fabric: L.Fabric, state: dict, checkpoint_dir: str | Path, t
 
 
 def load_checkpoint(
-    fabric: L.Fabric, state: dict | None, checkpoint_dir: str | Path, train_step: int | None = None
+    fabric: L.Fabric,
+    state: dict | None,
+    checkpoint_dir: str | Path,
+    recovery_state: bool = False,
+    train_step: int | None = None,
 ) -> tuple[dict, Path]:
     checkpoint_name = "lit_model.pth"
     if train_step is not None:
         checkpoint_name = f"lit_model_{train_step}.pth"
+    if recovery_state:
+        checkpoint_name = "lit_model_recovery.pth"
     checkpoint_dir = Path(checkpoint_dir)
-    fabric.print(f"Loading state from {str(checkpoint_dir)}")
+    fabric.print(f"Loading state from {str(checkpoint_dir / checkpoint_name)}")
     # This will load all torch related artifacts with their state dictionary,
     remainder = fabric.load(path=Path(checkpoint_dir / checkpoint_name), state=state)
     # TODO: Load random states
@@ -125,12 +143,7 @@ def weight_spectra(model: nn.Module) -> dict:
     return singular_val_per_layer
 
 
-def get_mup_shape_base(
-    base_config: Config,
-    target_config: Config,
-    output_file: Path,
-    verbose: bool = False
-) -> None:
+def get_mup_shape_base(base_config: Config, target_config: Config, output_file: Path, verbose: bool = False) -> None:
     """Get the shape difference between two models with different scaling dimensions for muP.
 
     Refer to the `../examples/save_model_base_shape.py` script for more details.

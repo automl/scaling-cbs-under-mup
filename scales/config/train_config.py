@@ -256,6 +256,14 @@ class TrainConfig(BaseConfig):
     If False, append step to filename.
 
     """
+    recovery_state: bool = False
+    """Does not overwrite the latest saved checkpoint, but instead renames it as "lit_model_recovery.pth" and saves a
+    new checkpoint (does this iteratively after every step), and automatically sets the model to load the recovered
+    checkpoint instead of main.
+
+    The reason for this addition is cases where we face failures during saving the model.
+
+    """
 
     save_init_state: bool = True
     """Whether to save the initial state, especially the initialization weights."""

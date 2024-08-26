@@ -201,7 +201,7 @@ def init_state(
     if train_args.load_state_path is not None:
         # load the state here
         try:
-            _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path))
+            _, _ = load_checkpoint(fabric, states, Path(train_args.load_state_path), train_args.recovery_state)
         except FileNotFoundError:
             warn(f"The path {train_args.load_state_path} does not exist, no checkpoint running")
         except Exception as e:
@@ -369,7 +369,13 @@ def train(
             states["train_steps"] % train_args.save_state_every == 0 or states["train_steps"] == 1 or last_step is True
         ) and not is_accumulating:
             states["torch_scheduler"] = train_args.lr_scheduler.scheduler
-            save_checkpoint(fabric, state=states, checkpoint_dir=Path(str(train_args.save_state_path)))
+            save_checkpoint(
+                fabric,
+                state=states,
+                checkpoint_dir=Path(str(train_args.save_state_path)),
+                recovery_state=train_args.recovery_state,
+                last_step=last_step,
+            )
             # save_checkpoint_state(
             #     save_state_path=Path(str(train_args.save_state_path)),
             #     train_steps=states["train_steps"],
