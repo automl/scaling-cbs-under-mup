@@ -237,9 +237,10 @@ def train(
     fabric.barrier()
 
     # accounting for steps gone in the previous training
-    for i, _batch in enumerate(train_iterator):
-        if i == states["train_steps"]:
-            break
+    if train_args.load_state_path and states["train_steps"] > 0:
+        for i, _batch in enumerate(train_iterator):
+            if i == states["train_steps"] * train_args.accumulation_iters - 1:
+                break
 
     # main training loop
     for batch in train_iterator:
@@ -254,6 +255,8 @@ def train(
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
+
+        print(input_ids)
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
