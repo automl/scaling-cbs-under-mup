@@ -173,64 +173,42 @@ def get_mup_shape_base(base_config: Config, target_config: Config, output_file: 
         )
 
 
-def count_trainable_parameters_kaplan(model: GPT_Scales):
+def count_trainable_parameters_kaplan(model: GPT_Scales) -> int:
     """Count the number of parameters using the Kaplan approach.
 
+    Table 1:
     https://arxiv.org/abs/2001.08361
 
     Args:
-    model : GPT model
+    model: GPT model
 
     Returns:
     int: Total number of parameters
 
     """
-    # TODO: verify code
+    # TODO: verify codes
+    attn_proj = model.config.n_layer * model.config.n_embd * model.config.n_embd
+    feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
 
-    return 2 * model.config.n_embd * model.config.n_layer * (2 * model.config.n_embd + model.config.intermediate_size)
+    return attn_proj + feedforward
 
 
-def count_trainable_parameters_chinchilla(
-    model: nn.Module, return_all: bool = False, verbose: bool = False
-) -> int | tuple[int, int]:
-    """Count the number of parameters in a PyTorch model using an interpretation of the Chinchilla approach.
+def count_trainable_parameters_chinchilla(model: GPT_Scales) -> int:
+    """Count the number of parameters the Chinchilla approach.
+    https://arxiv.org/abs/2203.15556
 
-    Based on the Hoffmann et al. paper "Training Compute-Optimal Large Language Models",
-    this function attempts to exclude embedding parameters. However, the exact definition
-    of what constitutes "embedding parameters" may vary depending on the model architecture.
-
-    NOTE: Generated from Claude 3.5 Sonnet on August 13, 2024.
+    Using table 1 from Kaplan  https://arxiv.org/abs/2001.08361 but addint embeddings
 
     Args:
-    model (nn.Module): PyTorch model
+    model: GPT model
 
     Returns:
-    int: Estimated number of non-embedding parameters
-    or
-    tuple[int, int]: Total number of parameters and embedding parameters
+    int: Return number of parameters
 
     """
     # TODO: verify code
+    embed = (model.config.vocab_size + model.config.block_size) * model.config.n_embd
+    attn_proj = model.config.n_layer * model.config.n_embd * model.config.n_embd
+    feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
 
-    def is_embedding_like(module):
-        return isinstance(module, (nn.Embedding, nn.EmbeddingBag))
-
-    total_params = 0
-    embedding_params = 0
-
-    for name, module in model.named_modules():
-        if len(list(module.children())) == 0:  # it's a leaf module
-            module_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
-            if is_embedding_like(module):
-                embedding_params += module_params
-            else:
-                total_params += module_params
-
-    if verbose:
-        print(f"Total parameters: {total_params + embedding_params}")
-        print(f"Embedding parameters: {embedding_params}")
-        print(f"Non-embedding parameters: {total_params}")
-
-    if return_all:
-        return total_params, embedding_params
-    return embedding_params
+    return embed + attn_proj + feedforward
