@@ -173,16 +173,13 @@ def get_mup_shape_base(base_config: Config, target_config: Config, output_file: 
         )
 
 
-def count_trainable_parameters_kaplan(model):
-    """Count the number of parameters in a PyTorch model using the Kaplan approach.
+def count_trainable_parameters_kaplan(model: GPT_Scales):
+    """Count the number of parameters using the Kaplan approach.
 
-    In the Kaplan et al. paper "Scaling Laws for Neural Language Models",
-    they count all parameters in the model, including embeddings.
-
-    NOTE: Generated from Claude 3.5 Sonnet on August 13, 2024.
+    https://arxiv.org/abs/2001.08361
 
     Args:
-    model (nn.Module): PyTorch model
+    model : GPT model
 
     Returns:
     int: Total number of parameters
@@ -190,7 +187,7 @@ def count_trainable_parameters_kaplan(model):
     """
     # TODO: verify code
 
-    return sum(p.numel() for p in model.parameters())
+    return 2 * model.config.n_embd * model.config.n_layer * (2 * model.config.n_embd + model.config.intermediate_size)
 
 
 def count_trainable_parameters_chinchilla(
