@@ -20,7 +20,12 @@ from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
 from scales.model import GPT_Scales, file_data_share, initialize_weights
 from scales.tblog_utils import load_tb
-from scales.utils import load_checkpoint, save_checkpoint
+from scales.utils import (
+    count_trainable_parameters_chinchilla,
+    count_trainable_parameters_kaplan,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 
 def main(
@@ -54,7 +59,11 @@ def main(
     micro_batch_size = train_args.micro_batch_size
     block_size = train_args.block_size
 
-    fabric.print(f"Number of trainable parameters: {train_args.trainable_params:,}")
+    fabric.print(f"Number of trainable parameters litgpt: {train_args.trainable_params:,}")
+    fabric.print(f"Number of trainable prameters Kaplan: {count_trainable_parameters_kaplan(states['model']) / 1e6} M")
+    fabric.print(
+        f"Number of trainable parameters Chinchilla: {count_trainable_parameters_chinchilla(states['model']) / 1e6} M"
+    )
 
     # Setting up the data with the relevant tokenizer
     data.load_data_loaders(
@@ -255,8 +264,6 @@ def train(
         # Properly adjust the dimensions
         input_ids = batch[:, 0:max_seq_length].contiguous().long()
         targets = batch[:, 1 : (max_seq_length + 1)].contiguous().long()
-
-        print(input_ids)
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
