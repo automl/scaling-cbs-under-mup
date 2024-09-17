@@ -207,7 +207,7 @@ def count_trainable_parameters_chinchilla(model: GPT_Scales) -> int:
 
     """
     # TODO: verify code
-    embed = (model.config.vocab_size + model.config.block_size) * model.config.n_embd
+    embed = (model.config.padded_vocab_size + model.config.block_size) * model.config.n_embd
     attn_proj = model.config.n_layer * model.config.n_embd * model.config.n_embd
     feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
 
