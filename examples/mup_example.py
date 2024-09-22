@@ -27,6 +27,9 @@ if __name__ == "__main__":
         block_size=1024,
         weight_decay=0,
         max_val_steps=2,
+        warmup_fraction=0.2,
+        cosine_scheduler=True,
+        scheduler_args={"T_max": None, "max_lr_final_decay": 0.1},
         model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=args.width),
         tracked_metrics={
             "train_loss": 1,
@@ -41,7 +44,7 @@ if __name__ == "__main__":
             "optimizer_stats": 1,
         },
         mup_base_shape_path="width32.bsh",
-        max_train_steps=10,
+        max_train_steps=100,
     )
 
     data_handler = DataHandler(

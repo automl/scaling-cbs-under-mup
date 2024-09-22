@@ -27,14 +27,14 @@ if __name__ == "__main__":
         train_conf = TrainConfig(
             max_lr=0.01,
             micro_batch_size=args.micro_batch_size,
-            block_size=128,
+            block_size=1024,
             weight_decay=0.001,
             max_val_steps=2,
             accumulation_iters=args.accumulation_iters,
             warmup_fraction=0.2,
             cooldown_fraction=0.2,
-            torch_scheduler="CosineAnnealingLR",
-            torch_scheduler_args={"T_max": None, "eta_min": 5e-4},
+            cosine_scheduler=True,
+            scheduler_args={"T_max": None, "max_lr_final_decay": 0.1},
             model_config=Config(block_size=1024, n_layer=3, n_head=2, vocab_size=50257, bias=True, n_embd=args.width),
             tracked_metrics={
                 "train_loss": 1,

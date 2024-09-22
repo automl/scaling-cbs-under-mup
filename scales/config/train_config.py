@@ -179,14 +179,12 @@ class TrainConfig(BaseConfig):
     """Fraction of steps to cooldown schedule."""
     warmup_fraction: float | None = None
     """Fraction of steps in the warmup schedule."""
-    cooldown_type: str = "linear"
-    """When cooldown to min_lr is needed, this should be set to true."""
     min_lr: float = 0.0
     """`min_lr` the scheduler can reach."""
-    torch_scheduler: str | None = None
-    """Torch type scheduler defined in a string."""
-    torch_scheduler_args: dict | None = None
-    """All torch scheduler arguments."""
+    cosine_scheduler: bool = False
+    """Cosine annealing scheduler."""
+    scheduler_args: dict | None = None
+    """Cosine annealing scheduler arugments."""
 
     # training length
     max_train_steps: int | None = None
@@ -333,9 +331,8 @@ class TrainConfig(BaseConfig):
             min_lr=self.min_lr,
             warmup_frac=self.warmup_fraction,
             cool_down_frac=self.cooldown_fraction,
-            cooldown_type=self.cooldown_type,
-            torch_scheduler=self.torch_scheduler,
-            torch_scheduler_args=self.torch_scheduler_args,
+            scheduler_args=self.scheduler_args,
+            cosine_scheduler=self.cosine_scheduler,
         )
 
         self.tracked_metrics = {} if self.tracked_metrics is None else self.tracked_metrics

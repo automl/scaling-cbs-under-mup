@@ -181,7 +181,7 @@ def init_state(
         fabric.print("Using MuP Optimizer")
         states["optimizer"] = MuAdamW(
             states["model"].parameters(),
-            lr=train_args.lr_scheduler.init_lr,
+            lr=train_args.lr_scheduler.max_lr,
             weight_decay=train_args.true_weight_decay,
             betas=(train_args.adam_beta_1, train_args.adam_beta_2),
             eps=train_args.adam_eps,
@@ -189,12 +189,13 @@ def init_state(
     else:
         states["optimizer"] = torch.optim.AdamW(
             states["model"].parameters(),
-            lr=train_args.lr_scheduler.init_lr,
+            lr=train_args.lr_scheduler.max_lr,
             weight_decay=train_args.true_weight_decay,
             betas=(train_args.adam_beta_1, train_args.adam_beta_2),
             eps=train_args.adam_eps,
         )
 
+    train_args.lr_scheduler.setup_scheduler(optimizer=states["optimizer"])
     states["model"] = fabric.setup_module(states["model"])
     states["optimizer"] = fabric.setup_optimizers(states["optimizer"])
 
@@ -386,14 +387,6 @@ def train(
                 recovery_state=train_args.recovery_state,
                 last_step=last_step,
             )
-            # save_checkpoint_state(
-            #     save_state_path=Path(str(train_args.save_state_path)),
-            #     train_steps=states["train_steps"],
-            #     model=states["model"],
-            #     optimizer=states["optimizer"],
-            #     scheduler=states["torch_scheduler"],
-            #     overwrite_checkpoint=train_args.overwrite_state,
-            # )
             if train_args.save_state_path is not None and fabric.global_rank == 0:
                 result_path = train_args.save_state_path / "result.yaml"
                 with result_path.open(mode="w", encoding="utf-8") as file:

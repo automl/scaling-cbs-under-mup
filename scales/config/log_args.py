@@ -90,7 +90,10 @@ class LoggingArgs:
 
     @should_log
     def learning_rate(self, optimizer: Optimizer, step: int) -> None:
-        self.writer.add_scalar(tag="Learning Rate", scalar_value=optimizer.param_groups[-1]["lr"], global_step=step)
+        for i, param_group in enumerate(optimizer.param_groups):
+            self.writer.add_scalar(
+                tag=f"Learning Rate/Param Group {i}", scalar_value=param_group["lr"], global_step=step
+            )
 
     @should_log
     def output_logits_max(self, logits: torch.Tensor, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
