@@ -20,12 +20,7 @@ from scales.config.data_config import DataHandler
 from scales.config.train_config import TrainConfig
 from scales.model import GPT_Scales, file_data_share, initialize_weights
 from scales.tblog_utils import load_tb
-from scales.utils import (
-    count_trainable_parameters_chinchilla,
-    count_trainable_parameters_kaplan,
-    load_checkpoint,
-    save_checkpoint,
-)
+from scales.utils import load_checkpoint, save_checkpoint
 
 
 def main(
@@ -60,10 +55,8 @@ def main(
     block_size = train_args.block_size
 
     fabric.print(f"Number of trainable parameters litgpt: {train_args.trainable_params:,}")
-    fabric.print(f"Number of trainable prameters Kaplan: {count_trainable_parameters_kaplan(states['model']) / 1e6} M")
-    fabric.print(
-        f"Number of trainable parameters Chinchilla: {count_trainable_parameters_chinchilla(states['model']) / 1e6} M"
-    )
+    fabric.print(f"Number of prameters Kaplan: {train_args.kaplan_params / 1e6} M")
+    fabric.print(f"Number of parameters Chinchilla: {train_args.chinchilla_params / 1e6} M")
 
     # Setting up the data with the relevant tokenizer
     data.load_data_loaders(

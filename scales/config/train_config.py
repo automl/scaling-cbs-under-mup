@@ -18,6 +18,10 @@ from scales.config.eval_config import EvalHandler
 from scales.config.log_args import LoggingArgs
 from scales.lr_utils import LRScheduler
 from scales.model import GPT_Scales
+from scales.utils import (
+    count_trainable_parameters_chinchilla,
+    count_trainable_parameters_kaplan,
+)
 
 
 def resolve_model_config(
@@ -280,6 +284,8 @@ class TrainConfig(BaseConfig):
         self._mup_base_shape: dict | None = None
 
         self.trainable_params = num_parameters(GPT_Scales(self.model_config), requires_grad=True)
+        self.chinchilla_params = count_trainable_parameters_chinchilla(GPT_Scales(self.model_config))
+        self.kaplan_params = count_trainable_parameters_kaplan(GPT_Scales(self.model_config))
         self.devices = parse_devices(self.devices)
 
         if isinstance(self.devices, str):
@@ -316,7 +322,7 @@ class TrainConfig(BaseConfig):
             tokens_per_param=self.tokens_per_param,
             micro_batch_size=self.micro_batch_size,
             block_size=self.block_size,
-            trainable_params=self.trainable_params,
+            trainable_params=self.chinchilla_params,
             accumulation_iters=self.accumulation_iters,
             devices=self.devices,
             deepseek_hparams=self.deepseek_hparams,
