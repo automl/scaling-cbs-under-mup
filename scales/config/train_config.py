@@ -122,8 +122,9 @@ def get_mup_base_shape(target_config: Config | ConfigWrapper, base_scales: dict[
         for name, base_scale in base_scales.items():
             setattr(base_config, name, base_scale)
             setattr(delta_config, name, base_scale * 2)
-        base_config = ConfigWrapper.from_config(base_config.config)
-        delta_config = ConfigWrapper.from_config(delta_config.config)
+        # Re-run Config. __post_init__ to update the config
+        base_config = ConfigWrapper.from_config(base_config)
+        delta_config = ConfigWrapper.from_config(delta_config)
 
     base_shapes = get_shapes(GPT_Scales(base_config, mup_init=True))
     delta_shapes = get_shapes(GPT_Scales(delta_config, mup_init=True))
@@ -181,8 +182,10 @@ class TrainConfig(BaseConfig):
     """Fraction of steps in the warmup schedule."""
     cooldown_type: str = "linear"
     """When cooldown to min_lr is needed, this should be set to true."""
-    min_lr: float = 0.0
-    """`min_lr` the scheduler can reach."""
+    min_lr: float | None = None
+    """ (DEPRECATED) The minimum learning rate."""
+    min_lr_ratio: float = 0.0
+    """The lowest ratio of the `max_lr` the scheduler can reach."""
     torch_scheduler: str | None = None
     """Torch type scheduler defined in a string."""
     torch_scheduler_args: dict | None = None
@@ -283,6 +286,7 @@ class TrainConfig(BaseConfig):
 
         self.trainable_params = num_parameters(GPT_Scales(self.model_config), requires_grad=True)
         self.devices = parse_devices(self.devices)
+        self.min_lr = self.max_lr * self.min_lr_ratio if self.min_lr_ratio else self.min_lr
 
         if isinstance(self.devices, str):
             raise ValueError("`devices` is wrongly initialized and should be an in")
@@ -349,7 +353,9 @@ class TrainConfig(BaseConfig):
     @property
     def true_weight_decay(self) -> float:
         if self.independent_wd:
-            return self.weight_decay / self.lr_scheduler.max_lr
+            scaled_wd = self.weight_decay / self.lr_scheduler.max_lr
+            # upper bound WD to 1
+            return scaled_wd if scaled_wd <= 1 else 1
         return self.weight_decay
 
     @property

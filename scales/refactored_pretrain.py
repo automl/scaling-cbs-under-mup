@@ -300,6 +300,7 @@ def train(
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
 
+            
             if getattr(train_args, "z_loss_eps", None) is not None:
                 # implementation from
                 # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
@@ -310,7 +311,6 @@ def train(
 
         if accumulation_iters > 1 or fabric.world_size > 1:
             print(f"Loop Iteration {loop_iters} - Device {fabric.global_rank} - Micro Batch Loss {loss.item()} ")
-
         if not is_accumulating:
             if train_args.clip_max_norm is not None or train_args.clip_max_val is not None:
                 fabric.clip_gradients(

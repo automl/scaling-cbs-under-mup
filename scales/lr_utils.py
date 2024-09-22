@@ -44,6 +44,7 @@ class LRScheduler:
         if self.end_warmup_step:
             self.warmup_slope = self.max_lr / self.end_warmup_step
 
+
         self.cooldown_slope: float | None = None
         self.min_lr_at_cooldown_start: float | None = None
 
@@ -100,10 +101,10 @@ class LRScheduler:
             if self.torch_scheduler is not None:
                 if self.scheduler is None:
                     self.scheduler = self._instantiate_lr_scheduler(optimizer)
-
-                self.scheduler.step()
-                if self._get_min_lr_from_optim(optimizer=optimizer) < self.min_lr:
-                    self._edit_lr_mult(optimizer, 1)
+                
+                if self._get_min_lr_from_optim(optimizer=optimizer) > self.min_lr:
+                    self.scheduler.step()
+                    # self._edit_lr_mult(optimizer, 1)
             else:
                 return
         # Cooldown

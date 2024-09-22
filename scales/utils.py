@@ -138,7 +138,7 @@ def weight_spectra(model: nn.Module) -> dict:
     singular_val_per_layer = {}
     for name, mod in model.named_modules():
         if isinstance(mod, torch.nn.Linear):
-            singular_vals = torch.linalg.svdvals(mod.weight.data).detach()
+            singular_vals = torch.linalg.svdvals(mod.weight.data.detach()).cpu()
             singular_val_per_layer[name] = singular_vals
     return singular_val_per_layer
 

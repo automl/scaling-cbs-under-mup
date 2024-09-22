@@ -19,8 +19,16 @@ def change_load_state_path(
     config.train_config.load_state_path = out_path  # type: ignore
     return config
 
+def add_z_loss_and_wd(config: PipelineConfig,
+                      z_loss_eps: float = 1e-4,
+                      independent_wd: bool = True) -> PipelineConfig:
+    config.train_config.z_loss_eps = z_loss_eps
+    config.train_config.independent_wd = independent_wd
+    return config
 
-def change_dataset(config: PipelineConfig, hf_dataset_id: str = "", hf_data_subset_name: str = ""):
+def change_dataset(config: PipelineConfig,
+                   hf_dataset_id: str = "",
+                   hf_data_subset_name: str = ""):
     config.data_config.hf_dataset_id = hf_dataset_id
     config.data_config.hf_data_subset_name = hf_data_subset_name
     return config
@@ -97,7 +105,8 @@ def modify_function(config_path: Path, **kwargs: Any) -> PipelineConfig:
     tracked_metrics = kwargs.pop("tracked_metrics", {})
     config = change_load_state_path(config, config_path, None)
     # config = convert_to_new_lr_param(config)
-    config = change_lr_to_const(config)
+    config = add_z_loss_and_wd(config)
+    # config = change_lr_to_const(config)
     config = change_logging(config, tracked_metrics=tracked_metrics)
     config = change_dataset(config, **kwargs)
     # Modify Config End
@@ -125,31 +134,31 @@ def modify_configs(
 
 if __name__ == "__main__":
     # Hardcode your modification here
-    configs_folder: Path | None = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/run=1")
+    configs_folder: Path | None = Path(
+        "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=2"
+    )
     # configs_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_selected/run=1")
     config_pathes: list[Path] | None = None
-    output_root_folder: Path | None = Path(
-        "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
-    )
+    # output_root_folder: Path | None = Path(
+    #     "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
+    # )
     # copy_to_folder: Path | None = "/work/dlclarge1/garibovs-scales_n_arp/configs/SlimPajama-subset_generated=1"
     output_root_folder = None
-    copy_to_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/const_lr_no_lr_scale_n_decay_run=1")
-    modify_configs(
-        configs_folder,
-        config_pathes,
-        #    output_root_folder=output_root_folder,
-        tracked_metrics={
-            "learning_rate": 1,
-            "train_loss": 1,
-            "output_logits_max": 10,
-            "output_logits_mean": 10,
-            "max_attention_logits_per_layer": 10,
-            "max_attention_logits_all": 10,
-            "total_gradient_norm": 20,
-            "gradient_norm_per_layer": 20,
-            "validation_loss": 5,
-        },
-        copy_to_folder=copy_to_folder,
-        hf_dataset_id="DKYoon/SlimPajama-6B",
-        hf_data_subset_name="",
-    )
+    # copy_to_folder = Path("/work/dlclarge1/garibovs-scales_n_arp/configs/neps_all/const_lr_no_lr_scale_n_decay_run=1")
+    modify_configs(configs_folder, config_pathes, 
+                #    output_root_folder=output_root_folder, 
+                tracked_metrics={"learning_rate": 1, 
+                                 "train_loss": 1, 
+                                 "output_logits_max": 10,
+                                 "output_logits_mean": 10,
+                                 "max_attention_logits_per_layer": 10,
+                                 "max_attention_logits_all": 10,
+                                 "total_gradient_norm": 20,
+                                 "gradient_norm_per_layer": 20,
+                                 "validation_loss": 5,
+                                 "weight_spectra_max": 5,
+                                 "weight_spectra_diff": 5},
+                #    copy_to_folder=copy_to_folder,
+                   hf_dataset_id="DKYoon/SlimPajama-6B",
+                   hf_data_subset_name=""
+                   )

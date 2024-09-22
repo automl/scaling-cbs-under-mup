@@ -24,7 +24,7 @@ def create_slurm_script(
 
     folder_path = Path(folder_path)
     results_path = Path(results_path)
-    log_path = results_path / "logs"
+    log_path = results_path / "log"
     script_folder = results_path / "submit"
     results_folder = results_path / "results"
     config_paths = []
@@ -42,10 +42,9 @@ def create_slurm_script(
     array_str = f"AR=({' '.join(config_paths)})"
 
     # Create the command to run the python script
-    command = (
-        f"poetry run python {python_path} ${{AR[$SLURM_ARRAY_TASK_ID]}} {results_folder} --data_root_path={data_root}"
-    )
 
+    command = f"srun poetry run python {python_path} ${{AR[$SLURM_ARRAY_TASK_ID]}} {results_folder} --data_root_path={data_root}"
+    
     log_path.mkdir(parents=True, exist_ok=True)
     script_folder.mkdir(parents=True, exist_ok=True)
     results_folder.mkdir(parents=True, exist_ok=True)
@@ -56,11 +55,12 @@ def create_slurm_script(
     slurm_script.append(f"#SBATCH --job-name {job_name}")
     slurm_script.append(f"#SBATCH --partition {partition}")
     slurm_script.append(f"#SBATCH --gres=gpu:{gpu_per_job}")
+    slurm_script.append(f"#SBATCH --ntasks-per-node={gpu_per_job}")
     slurm_script.append(f"#SBATCH --time {max_time}")
     slurm_script.append(f"#SBATCH --output {log_path}/%x.%A.%a.%N.out")
     slurm_script.append(f"#SBATCH --error {log_path}/%x.%A.%a.%N.err")
     slurm_script.append("#SBATCH --mail-type=FAIL")
-    slurm_script.append(f"#SBATCH --array 1-{len(config_paths)}")
+    slurm_script.append(f"#SBATCH --array 0-{len(config_paths) - 1}%12")
     slurm_script.append("#SBATCH -D /work/dlclarge1/garibovs-scales_n_arp/")
     slurm_script.append("source ./activate_env.sh")
     slurm_script.append("cd scaling_all_the_way")
@@ -76,12 +76,13 @@ def create_slurm_script(
 
 
 if __name__ == "__main__":
-    folder_path = "/work/dlclarge1/garibovs-scales_n_arp/configs/neps_selected/run=1"
-    partition = "mlhiwidlc_gpu-rtx2080"
-    max_time = "0:12:00"
-    job_name = "selected_neps_run1"
-    gpu_per_job = 1
-    results_path = "/work/dlclarge1/garibovs-scales_n_arp/results/neps_selected/run=1"
+    folder_path = "/work/dlclarge1/garibovs-scales_n_arp/configs/grid_search/41M/wd_lr=1"
+    # partition = "mlhiwidlc_gpu-rtx2080"
+    partition = "bosch_gpu-rtx2080"
+    max_time = "0-12:00"
+    job_name = "Grid_Search_LR_WD"
+    gpu_per_job = 4
+    results_path = "/work/dlclarge1/garibovs-scales_n_arp/results/grid_search/41M/wd_lr=1"
     path = create_slurm_script(folder_path, partition, max_time, job_name, gpu_per_job, results_path)
     # Submit the job
     os.system(f"sbatch {path}")

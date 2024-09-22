@@ -24,6 +24,8 @@ class ConfigWrapper(BaseConfig):
     bias: bool = True
     apply_qk_norm: bool = False
     norm_class_name: Literal["LayerNorm", "RMSNorm"] = "LayerNorm"
+    rotary_percentage: float = 0.25
+    norm_eps: float = 1e-5
     lm_head_bias: bool = False
     _initialized: bool = False
 
@@ -35,6 +37,8 @@ class ConfigWrapper(BaseConfig):
             block_size=self.block_size,
             vocab_size=self.vocab_size,
             norm_class_name=self.norm_class_name,
+            rotary_percentage=self.rotary_percentage,
+            norm_eps=self.norm_eps,
             bias=self.bias,
             lm_head_bias=self.lm_head_bias,
         )
@@ -43,7 +47,8 @@ class ConfigWrapper(BaseConfig):
         self.ignore_fields.append("_initialized")
 
     def to_dict(self, ignore_defaults: bool = False) -> dict[str, Any]:
-        return super().to_dict(ignore_defaults=ignore_defaults) if ignore_defaults else asdict(self.config)
+        # TODO: Add a way to priint all config attributes as well
+        return super().to_dict(ignore_defaults=ignore_defaults)
 
     def __getattr__(self, item: str) -> Any:
         if not self._initialized:
@@ -55,7 +60,8 @@ class ConfigWrapper(BaseConfig):
     def __setattr__(self, key: str, value: Any) -> None:
         if key == "config":
             super().__setattr__(key, value)
-        elif key in ["d_model", "n_head", "n_layer", "block_size", "vocab_size"]:
+        # Perhaps this check should be removed
+        elif key in [field.name for field in fields(ConfigWrapper)] and key != "_initialized":
             super().__setattr__(key, value)
             if self._initialized:
                 if key == "d_model":
