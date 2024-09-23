@@ -53,7 +53,7 @@ class LRScheduler:
         for _, param_group in enumerate(optimizer.param_groups):
             self.learning_rates.append(param_group["lr"])
 
-        if self.end_warmup_step:
+        if self.n_warmup != 0:
             for _, param_group in enumerate(optimizer.param_groups):
                 param_group["lr"] = 0
             for learning_rate in self.learning_rates:
