@@ -83,6 +83,7 @@ def main(
         "parameters": train_args.trainable_params,
         "effective_batch_size": effective_batch_size,
         "devices": device_count,
+        "train_target": train_args.train_steps,
         "scales": {
             "d_model": train_args.model_config.d_model,  # type: ignore
             "n_head": train_args.model_config.n_head,  # type: ignore

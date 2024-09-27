@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 
-def create_slurm_script(
+def create_slurm_script_folder(
     folder_path: str, partition: str, max_time: str, job_name: str, gpu_per_job: int, results_path: str
 ) -> Path:
     """Create a slurm script to run all the configs in the folder_path. The generated script will be saved in the
@@ -83,6 +83,6 @@ if __name__ == "__main__":
     job_name = "Grid_Search_LR_WD"
     gpu_per_job = 4
     results_path = "/work/dlclarge1/garibovs-scales_n_arp/results/grid_search/41M/wd_lr=1"
-    path = create_slurm_script(folder_path, partition, max_time, job_name, gpu_per_job, results_path)
+    path = create_slurm_script_folder(folder_path, partition, max_time, job_name, gpu_per_job, results_path)
     # Submit the job
     os.system(f"sbatch {path}")
