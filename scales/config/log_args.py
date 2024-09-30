@@ -221,6 +221,17 @@ class LoggingArgs:
     def tokens_per_step(self, value: int, step: int) -> None:
         self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
 
+    @should_log
+    def activations(self, activations: list, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
+        for layer_name, activation in activations.items():
+            if not is_accumulating:
+                total_activation_result = fabric.all_reduce(activation, reduce_op="mean")
+                self.writer.add_scalar(
+                    tag=f"Activations/{layer_name}", scalar_value=total_activation_result, global_step=step
+                )
+            else:
+                break
+
     def close(self) -> None:
         if self.writer is not None:
             self.writer.close()

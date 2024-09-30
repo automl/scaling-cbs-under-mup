@@ -42,6 +42,7 @@ if __name__ == "__main__":
             "max_attention_logits_per_layer": 5,
             "max_attention_logits_all": 5,
             "optimizer_stats": 1,
+            "activations": 1,
         },
         mup_base_shape_path="width32.bsh",
         max_train_steps=100,
