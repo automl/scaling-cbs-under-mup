@@ -217,6 +217,10 @@ class LoggingArgs:
     def validation_loss(self, value: float, step: int) -> None:
         self.writer.add_scalar(tag="Validation Loss", scalar_value=value, global_step=step)
 
+    @should_log
+    def tokens_per_step(self, value: int, step: int) -> None:
+        self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
+
     def close(self) -> None:
         if self.writer is not None:
             self.writer.close()
