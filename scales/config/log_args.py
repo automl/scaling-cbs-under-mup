@@ -236,8 +236,9 @@ class LoggingArgs:
         if not is_accumulating:
             reduced_activation_result = fabric.all_reduce(self.activation_results, reduce_op="mean")
             self.writer.add_scalar(
-                tag=f"Activations/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
+                tag=f"Activations L1/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
             )
+            self.activation_results = []
 
     def close(self) -> None:
         if self.writer is not None:
