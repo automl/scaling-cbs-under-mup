@@ -228,16 +228,20 @@ class LoggingArgs:
     ) -> None:
         continue_appending = False
         for i, (layer_name, activation) in enumerate(activations.items()):
+            print(layer_name, activation)
             if len(self.activation_results) == 0 or continue_appending:
                 continue_appending = True
                 self.activation_results.append(activation / accumulation_iters)
             else:
                 self.activation_results[i] += activation / accumulation_iters
+
         if not is_accumulating:
             reduced_activation_result = fabric.all_reduce(self.activation_results, reduce_op="mean")
-            self.writer.add_scalar(
-                tag=f"Activations L1/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
-            )
+            print(reduced_activation_result)
+            for i, (layer_name, activation) in enumerate(activations.items()):
+                self.writer.add_scalar(
+                    tag=f"Activations L1/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
+                )
             self.activation_results = []
 
     def close(self) -> None:
