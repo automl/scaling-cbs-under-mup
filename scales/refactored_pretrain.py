@@ -272,6 +272,7 @@ def train(
                 step=states["train_steps"],
                 fabric=fabric,
                 is_accumulating=is_accumulating,
+                accumulation_iters=accumulation_iters,
                 last=last_step,
             )
             logger.output_logits_mean(

@@ -70,6 +70,7 @@ class LoggingArgs:
             self.max_attn_logit = None
             self.max_attn_logits_per_layer: list[float] = []
             self.total_logits_max = None
+            self.activation_results: list[float] = []
             self.prev_weight_spectra: None | dict = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
@@ -222,15 +223,21 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
 
     @should_log
-    def activations(self, activations: list, step: int, fabric: L.Fabric, is_accumulating: bool) -> None:
-        for layer_name, activation in activations.items():
-            if not is_accumulating:
-                total_activation_result = fabric.all_reduce(activation, reduce_op="mean")
-                self.writer.add_scalar(
-                    tag=f"Activations/{layer_name}", scalar_value=total_activation_result, global_step=step
-                )
+    def activations(
+        self, activations: list, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
+    ) -> None:
+        continue_appending = False
+        for i, (layer_name, activation) in enumerate(activations.items()):
+            if len(self.activation_results) == 0 or continue_appending:
+                continue_appending = True
+                self.activation_results.append(activation / accumulation_iters)
             else:
-                break
+                self.activation_results[i] += activation / accumulation_iters
+        if not is_accumulating:
+            reduced_activation_result = fabric.all_reduce(self.activation_results, reduce_op="mean")
+            self.writer.add_scalar(
+                tag=f"Activations/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
+            )
 
     def close(self) -> None:
         if self.writer is not None:
