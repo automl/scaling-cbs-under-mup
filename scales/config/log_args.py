@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
@@ -237,6 +238,8 @@ class LoggingArgs:
         if not is_accumulating:
             reduced_activation_result = fabric.all_reduce(self.activation_results, reduce_op="mean")
             for i, (layer_name, activation) in enumerate(activations.items()):
+                layer_name = re.sub(r".*?module", "", layer_name)
+                layer_name = layer_name.replace("module", "").lstrip(".")
                 self.writer.add_scalar(
                     tag=f"Activations L1/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
                 )
