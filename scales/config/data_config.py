@@ -395,12 +395,20 @@ class DataHandler(BaseConfig):
         self.access_internet = access_internet
         self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
-            self.data_loaders[split] = StreamingDataLoader(
-                dataset=self.datasets[split],
-                batch_size=batch_size,
-                num_workers=num_workers,
-                shuffle=False,
-            )
+            if split == "train":
+                self.data_loaders[split] = StreamingDataLoader(
+                    dataset=self.datasets[split],
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    shuffle=True,
+                )
+            else:
+                self.data_loaders[split] = StreamingDataLoader(
+                    dataset=self.datasets[split],
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    shuffle=False,
+                )
 
 
 if __name__ == "__main__":
