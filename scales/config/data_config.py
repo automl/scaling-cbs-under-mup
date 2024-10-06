@@ -14,7 +14,12 @@ from litdata.streaming.dataset import StreamingDataset
 from litgpt.tokenizer import Tokenizer
 
 from scales.config.base_config import BaseConfig
-from scales.config.utils import download_tokenizer, preprocess_wikitext, simple_filter, tokenize_wikitext
+from scales.config.utils import (
+    download_tokenizer,
+    preprocess_wikitext,
+    simple_filter,
+    tokenize_wikitext,
+)
 
 
 @dataclass
@@ -391,7 +396,10 @@ class DataHandler(BaseConfig):
         self.load_datasets(nlp_dataset=nlp_dataset, block_size=block_size)
         for split in self.splits:
             self.data_loaders[split] = StreamingDataLoader(
-                dataset=self.datasets[split], batch_size=batch_size, num_workers=num_workers
+                dataset=self.datasets[split],
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=False,
             )
 
 
