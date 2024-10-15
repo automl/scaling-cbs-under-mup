@@ -224,7 +224,22 @@ class LoggingArgs:
         self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
 
     @should_log
-    def activations(
+    def layerwise_features_rms_val(self, features: list[float], step: int, fabric: L.Fabric) -> None:
+        current_features_devices = fabric.all_reduce(features, reduce_op="mean")
+        current_features_sqrt = [torch.sqrt(feature) for feature in current_features_devices]
+        for i, val in enumerate(current_features_sqrt):
+            self.writer.add_scalar(f"RMS Feature Learning/Validation/Feature{i}", global_step=step, scalar_value=val)
+
+    @should_log
+    def layerwise_features_l1_mean_val(self, features: list[float], step: int, fabric: L.Fabric) -> None:
+        current_features_devices = fabric.all_reduce(features, reduce_op="mean")
+        for i, val in enumerate(current_features_devices):
+            self.writer.add_scalar(
+                f"L1 Mean Feature Learning/Validation/Feature{i}", global_step=step, scalar_value=val
+            )
+
+    @should_log
+    def activations_train(
         self, activations: list, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
     ) -> None:
         continue_appending = False

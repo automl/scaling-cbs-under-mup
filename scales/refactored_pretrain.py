@@ -245,7 +245,7 @@ def train(
             if i == states["train_steps"] * train_args.accumulation_iters - 1:
                 break
 
-    if "activations" in train_args.tracked_metrics and train_args.tracked_metrics is not None:
+    if "activations_train" in train_args.tracked_metrics and train_args.tracked_metrics is not None:
         activations = {}
         for name, layer in states["model"].named_modules():
             if len(list(layer.children())) == 0:
@@ -267,7 +267,7 @@ def train(
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
-            logger.activations(
+            logger.activations_train(
                 activations=activations,
                 step=states["train_steps"],
                 fabric=fabric,
@@ -378,6 +378,13 @@ def train(
                 max_seq_length,
                 train_args.max_val_steps,
             )
+            logger.layerwise_features_rms_val(
+                states["model"].get_features(type="l2"), step=states["train_steps"], last=last_step, fabric=fabric
+            )
+            logger.layerwise_features_l1_mean_val(
+                states["model"].get_features(type="l1"), step=states["train_steps"], last=last_step, fabric=fabric
+            )
+            states["model"].clear_features()
             logger.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
             result["train_steps"] = states["train_steps"]
@@ -413,7 +420,7 @@ def train(
 @torch.no_grad()
 def validate(
     fabric: L.Fabric,
-    model: nn.Module,
+    model: GPT_Scales,
     val_dataloader: DataLoader,
     max_seq_length: int,
     max_val_steps: int | None = None,
@@ -434,6 +441,7 @@ def validate(
 
         loss = nn.functional.cross_entropy(logits, targets)
         val_losses.append(loss)
+        model.update_val_steps(step)
     else:
         # if no break is taken
         fabric.print(f"Validation data is exhausted in {step} steps")

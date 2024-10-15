@@ -55,6 +55,61 @@ class GPT_Scales(GPT):
             }
         )
 
+        self.val_steps = 0
+        self.hs_l1 = [0 for _ in range(config.n_layer + 2)]
+        self.hs_l2 = [0 for _ in range(config.n_layer + 2)]
+
+    def update_val_steps(self, steps: int) -> None:
+        self.val_steps = steps + 1
+
+    def get_features(self, type: str = "l2") -> list:
+        if type == "l2":
+            return [(h / self.val_steps) for h in self.hs_l2]
+        if type == "l1":
+            return [(h / self.val_steps) for h in self.hs_l1]
+        raise ValueError("Wrong value for `type`, should be either `l1` or `l2`")
+
+    def clear_features(self) -> None:
+        self.hs_l1 = [0 for _ in range(self.config.n_layer + 2)]
+        self.hs_l2 = [0 for _ in range(self.config.n_layer + 2)]
+
+    def forward(self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None) -> torch.Tensor:
+        T = idx.size(1)
+        if self.max_seq_length < T:
+            raise ValueError(f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}.")
+
+        if input_pos is not None:  # use the kv cache
+            cos = self.cos.index_select(0, input_pos)
+            sin = self.sin.index_select(0, input_pos)
+            if self.mask_cache is None:
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            mask = self.mask_cache.index_select(2, input_pos)
+        else:
+            cos = self.cos[:T]
+            sin = self.sin[:T]
+            mask = None
+
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if self.config.scale_embeddings:
+            x = x * (self.config.n_embd**0.5)
+        if not self.training:
+            self.hs_l2[0] += torch.mean(x**2).item()
+            self.hs_l1[0] += torch.mean(torch.abs(x)).item()
+
+        for i, block in enumerate(self.transformer.h):
+            x = block(x, cos, sin, mask, input_pos)
+            if not self.training:
+                self.hs_l2[i + 1] += torch.mean(x**2).item()
+                self.hs_l1[i + 1] += torch.mean(torch.abs(x)).item()
+
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)  # (b, t, vocab_size)
+        if not self.training:
+            self.hs_l2[-1] += torch.mean(x**2).item()
+            self.hs_l1[-1] += torch.mean(torch.abs(x)).item()
+
+        return logits
+
 
 class Block_Scales(Block):
     def __init__(self, config: Config, mup_init: bool = False) -> None:
