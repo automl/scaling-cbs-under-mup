@@ -105,8 +105,8 @@ class GPT_Scales(GPT):
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)  # (b, t, vocab_size)
         if not self.training:
-            self.hs_l2[-1] += torch.mean(x**2).item()
-            self.hs_l1[-1] += torch.mean(torch.abs(x)).item()
+            self.hs_l2[-1] += torch.mean(logits**2).item()
+            self.hs_l1[-1] += torch.mean(torch.abs(logits)).item()
 
         return logits
 
