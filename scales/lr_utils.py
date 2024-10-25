@@ -26,6 +26,8 @@ class LRScheduler:
         self.n_middle = max_steps - self.n_warmup - self.n_cooldown
 
         self.end_cooldown_step = self.n_warmup + self.n_middle + self.n_cooldown - 1
+        if self.end_cooldown_step <= 0:
+            self.end_cooldown_step = 1
         self.end_warmup_step = self.n_warmup - 1
         self.end_decay_step = self.n_warmup + self.n_middle - 1
         self.max_lr_final_decay: float | None = None
