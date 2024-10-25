@@ -26,8 +26,6 @@ class LRScheduler:
         self.n_middle = max_steps - self.n_warmup - self.n_cooldown
 
         self.end_cooldown_step = self.n_warmup + self.n_middle + self.n_cooldown - 1
-        if self.end_cooldown_step <= 0:
-            self.end_cooldown_step = 1
         self.end_warmup_step = self.n_warmup - 1
         self.end_decay_step = self.n_warmup + self.n_middle - 1
         self.max_lr_final_decay: float | None = None
@@ -55,7 +53,7 @@ class LRScheduler:
         for _, param_group in enumerate(optimizer.param_groups):
             self.learning_rates.append(param_group["lr"])
 
-        if self.n_warmup != 0:
+        if self.n_warmup != 0 and self.end_warmup_step != 0:
             for _, param_group in enumerate(optimizer.param_groups):
                 param_group["lr"] = 0
             for learning_rate in self.learning_rates:
@@ -98,7 +96,7 @@ class LRScheduler:
 
     def step(self, steps: int, optimizer: Optimizer) -> None:
         # Warmup
-        if steps <= self.end_warmup_step:
+        if steps <= self.end_warmup_step and self.end_warmup_step != 0:
             if steps != 0:
                 for i, param_group in enumerate(optimizer.param_groups):
                     param_group["lr"] += self.warmup_slope[i]
