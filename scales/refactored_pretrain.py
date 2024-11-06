@@ -237,6 +237,7 @@ def train(
     result: dict[str, int | list[float] | None] = {"train_steps": 0, "val_loss": None, "train_loss": None}
     # Let's use cycleiterator to do max tokens...
     train_iterator = CycleIterator(train_dataloader)
+    validation_iterator = CycleIterator(val_dataloader)
 
     loop_iters = 0
     device_running_loss = 0
@@ -367,9 +368,10 @@ def train(
             val_loss = validate(
                 fabric,
                 states["model"],
-                val_dataloader,
+                validation_iterator,
                 max_seq_length,
                 train_args.max_val_steps,
+                last_step=last_step,
             )
             logger.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
@@ -415,18 +417,27 @@ def train(
 def validate(
     fabric: L.Fabric,
     model: nn.Module,
-    val_dataloader: DataLoader,
+    val_iterator: CycleIterator,
     max_seq_length: int,
     max_val_steps: int | None = None,
+    last_step: bool = False,
 ) -> torch.Tensor:
     fabric.barrier()
     model.eval()
 
+    final_val_tokens = 1024 * 1024
     step = 0
     val_losses = []
-    for step, batch in enumerate(val_dataloader):
+    if last_step:
+        # Validate for 2^20 tokens
+        max_val_steps = final_val_tokens // max_seq_length // val_iterator.iterable.batch_size // fabric.world_size
+        fabric.print(f"Running the final validation loop for {final_val_tokens} tokens")
+    if max_val_steps is None:
+        max_val_steps = len(val_iterator.iterable) // fabric.world_size
+    for step in range(max_val_steps):
         if max_val_steps and step >= max_val_steps:
             break
+        batch = next(val_iterator)
         input_ids = batch[:, :max_seq_length].contiguous().long()
         targets = batch[:, 1 : max_seq_length + 1].contiguous().long()
         logits = model(input_ids)
@@ -435,9 +446,6 @@ def validate(
 
         loss = nn.functional.cross_entropy(logits, targets)
         val_losses.append(loss)
-    else:
-        # if no break is taken
-        fabric.print(f"Validation data is exhausted in {step} steps")
 
     val_loss = torch.stack(val_losses).mean().detach().item()
     total_val_loss = fabric.all_reduce(torch.tensor(val_loss), reduce_op="mean")
