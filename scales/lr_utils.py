@@ -36,6 +36,8 @@ class LRScheduler:
         if torch_scheduler and torch_scheduler == "CosineAnnealingLR":
             torch_scheduler_args = {} if torch_scheduler_args is None else torch_scheduler_args
             torch_scheduler_args["T_max"] = max_steps - self.n_warmup - self.n_cooldown
+        else: 
+            torch_scheduler = None
 
         self.torch_scheduler = torch_scheduler
         self.torch_scheduler_args = torch_scheduler_args
@@ -81,11 +83,11 @@ class LRScheduler:
             self._edit_lr_add(optimizer, self.cooldown_slope)
         elif self.cooldown_type == "rsqrt":
             previous_min_lr = self._get_min_lr_from_optim(optimizer)
-
-            # max_lr * (1 - sqrt((step - cooldown_start)/n_decay)) - previous_lr
+            # rsqrt cooldown between max_lr and min_lr
+            # (max_lr - min_lr) * (1 - sqrt((step - cooldown_start)/n_decay)) + min_lr - previous_lr
             additive = (
-                self.min_lr_at_cooldown_start * (1 - math.sqrt((step - self.end_decay_step) / self.n_cooldown))
-                - previous_min_lr
+                (self.min_lr_at_cooldown_start - self.min_lr) * (1 - math.sqrt((step - self.end_decay_step) / self.n_cooldown))
+                + self.min_lr - previous_min_lr
             )
             self._edit_lr_add(optimizer, additive)
 
