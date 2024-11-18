@@ -65,16 +65,18 @@ def run(
     except torch.cuda.OutOfMemoryError as e:
         # in case of a memory error bump the config to the next config group
         # Expected config parent folder name: "some_text=some_number"
-        matching = re.search(r"([^=]+)=([\d]+)", str(config_path.parent.name))
-        if matching is not None:
-            folder_prefix, folder_order = matching.group(1), int(matching.group(2))
-            folder_order += 1
-
-            # Move the config to the new folder with name "some_text=some_number + 1"
-            new_config_folder = config_path.parent.parent / f"{folder_prefix}={folder_order}"
-            new_config_folder.mkdir(exist_ok=True)
-            new_config_path = new_config_folder / config_path.name
-            config_path = config_path.rename(new_config_path)
+        # matching = re.search(r"([^=]+)=([\d]+)", str(config_path.parent.name))
+        # if matching is not None:
+        #     folder_prefix, folder_order = matching.group(1), int(matching.group(2))
+        #     folder_order += 1
+        stem = config_path.stem + "_OOM"
+        new_config_path = config_path.with_stem(stem)
+        config_path.rename(new_config_path)
+        #     # Move the config to the new folder with name "some_text=some_number + 1"
+        #     new_config_folder = config_path.parent.parent / f"{folder_prefix}={folder_order}"
+        #     new_config_folder.mkdir(exist_ok=True)
+        #     new_config_path = new_config_folder / config_path.name
+        #     config_path = config_path.rename(new_config_path)
         raise e
 
     # if pipe_updated:
