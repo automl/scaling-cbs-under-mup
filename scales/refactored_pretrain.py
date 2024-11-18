@@ -25,6 +25,8 @@ from scales.utils import (
     count_trainable_parameters_kaplan,
     load_checkpoint,
     save_checkpoint,
+    norm_entropy,
+    neg_partial_entropy,
 )
 
 
@@ -172,6 +174,8 @@ def init_state(
             fabric=fabric,
             model=states["model"],
             mup_base_scales=train_args.mup_base_scales,
+            linear_std_scale=getattr(train_args, "linear_std_scale", 0.4),
+            projection_std_scale=getattr(train_args, "projection_std_scale", 1.0),
             init_type=train_args.weight_init_type,
         )
 
@@ -242,6 +246,7 @@ def train(
     loop_iters = 0
     device_running_loss = 0
     cumulative_throughput = 0
+    norm_ent_computed = False
     last_step = False
     exit_loop = False
 
@@ -304,11 +309,21 @@ def train(
             loss = nn.functional.cross_entropy(logits, targets)
 
             
-            if getattr(train_args, "z_loss_eps", None) is not None:
+            if getattr(train_args, "z_loss_eps", None) is not None and getattr(train_args, "z_loss_eps", 0.) > 0:
                 # implementation from
                 # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
                 z_loss = train_args.z_loss_eps * torch.square(torch.logsumexp(logits, dim=-1)).mean()
                 loss += z_loss
+
+            if getattr(train_args, "s_loss_eps", None) is not None and getattr(train_args, "s_loss_eps", 0.) > 0:
+                if not norm_ent_computed:
+                    layerwise_sv_norm_entropy = [norm_entropy(torch.linalg.svdvals(mod.weight.data)) 
+                                                for _, mod in states["model"].named_modules() 
+                                                if isinstance(mod, torch.nn.Linear)]
+                    init_s = torch.square(torch.tensor(layerwise_sv_norm_entropy, dtype=loss.dtype, device=loss.device)).mean()
+                    norm_ent_computed = True
+                s_loss = train_args.s_loss_eps * (1 - init_s)
+                loss += s_loss
             fabric.backward(loss / accumulation_iters)
             device_running_loss += loss.item() / accumulation_iters
 
@@ -327,7 +342,9 @@ def train(
             logger.learning_rate(optimizer=states["optimizer"], step=states["train_steps"], last=last_step)
             logger.weight_spectra_max(model=states["model"], step=states["train_steps"], last=last_step)
             logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
-
+            logger.weight_spectra_dist_entropy(model=states["model"], step=states["train_steps"], last=last_step)
+            logger.weight_spectra_dist_norm_entropy(model=states["model"], step=states["train_steps"], last=last_step)
+            
             states["optimizer"].step()
             logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
@@ -356,6 +373,7 @@ def train(
             states["train_steps"] += 1
             device_running_loss = 0
             loop_iters = 0
+            norm_ent_computed = False
             if last_step is True:
                 exit_loop = True
         else:

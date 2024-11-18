@@ -212,3 +212,38 @@ def count_trainable_parameters_chinchilla(model: GPT_Scales) -> int:
     feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
 
     return embed + attn_proj + feedforward
+
+
+def count_trainable_params_chinchilla_from_config(model_config: Config) -> int:
+    """Count the number of parameters the Chinchilla approach.
+    https://arxiv.org/abs/2203.15556
+
+    Using table 1 from Kaplan  https://arxiv.org/abs/2001.08361 but addint embeddings
+
+    Note this is a simple version that estimates the model size as opposed to counting exact trainable parameters.
+    Args:
+    model: GPT model
+
+    Returns:
+    int: Return number of parameters
+
+    """
+
+    # TODO: verify code
+    embed = (model_config.padded_vocab_size + model_config.block_size) * model_config.n_embd
+    attn_proj = model_config.n_layer * model_config.n_embd * model_config.n_embd
+    feedforward = model_config.n_layer * 2 * model_config.n_embd * model_config.intermediate_size
+
+    return embed + attn_proj + feedforward
+
+
+def  norm_entropy(sing_vals):
+    probs = torch.divide(sing_vals, torch.sum(sing_vals))
+    entropy = torch.distributions.Categorical(probs=probs).entropy()
+    norm_entropy = entropy / torch.log(torch.tensor(len(probs)))
+    return norm_entropy
+
+def neg_partial_entropy(sing_vals):
+    # probs = torch.divide(torch.exp(sing_vals), torch.sum(torch.exp(sing_vals)))
+    probs = torch.nn.functional.softmax(sing_vals, dim=0)
+    return torch.sum(probs * sing_vals) + torch.logsumexp(sing_vals, 0)

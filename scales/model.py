@@ -60,6 +60,44 @@ class Block_Scales(Block):
     def __init__(self, config: Config, mup_init: bool = False) -> None:
         super().__init__(config)
         self.attn = CausalSelfAttention_Scales(config, mup_init)
+        self.residiual_weight = getattr(config, "attn_residual_weight", 0.5)
+        self.rec_mlp_weight = getattr(config, "rec_mlp_weight", 0.5)
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        cos: torch.Tensor,
+        sin: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        input_pos: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Non-parallel residual       Parallel residual
+           ┌─ x                     ┌─ x ────────────┐             Note: if `shared_attention_norm` is True,
+           │  ↓                     │  ↓             ↓                   the output from `norm_1` is reused
+           │  norm_1                │  norm_1  ───►  norm_2
+           │  ↓                     │  ↓             ↓
+           │  attn                  │  attn          mlp
+           │  ↓                     │  ↓             │
+        ┌─ └► +                     └► + ◄───────────┘
+        │     norm_2
+        │     ↓
+        │     mlp
+        │     ↓
+        └───► +
+        """
+
+        x_normed = self.norm_1(x)
+        attention_output = self.attn(x_normed, cos, sin, mask, input_pos)
+
+        if self.config.parallel_residual:
+            x_normed = x_normed if self.config.shared_attention_norm else self.norm_2(x)
+            x_intermediate = 2 * (1 - self.residiual_weight) * attention_output + 2 * self.residiual_weight * x
+            x =  2 * (1 - self.rec_mlp_weight) * self.mlp(x_normed) + 2 * self.rec_mlp_weight * x_intermediate
+        else:
+            x = 2 * (1 - self.residiual_weight) * attention_output + 2 * self.residiual_weight * x
+            x = 2 * (1 - self.rec_mlp_weight) * self.mlp(self.norm_2(x)) + 2 * self.rec_mlp_weight * x
+        return x
 
 
 class CausalSelfAttention_Scales(CausalSelfAttention):
@@ -161,6 +199,8 @@ def initialize_weights(
     fabric: L.Fabric,
     model: GPT_Scales,
     mup_base_scales: dict[str, int] | int | None = None,
+    linear_std_scale: float = 0.4,
+    projection_std_scale: float = 1.0,
     init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek"] | None = None,
 ) -> None:
     def init_weights(
@@ -214,6 +254,22 @@ def initialize_weights(
             if isinstance(mod, (nn.Embedding, nn.Linear)):
                 sigma = 0.006  # TODO: mention source
                 mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=False)
+    elif init_type is "HP":
+        # Parametrize GPT-NeoX weight initialization. 
+        d_model = model.config.n_embd
+        sigma = math.sqrt(linear_std_scale) * math.sqrt(1.0 / d_model)
+        for mod in model.modules():
+            if isinstance(mod, (nn.Embedding, nn.Linear)):
+                mod.reset_parameters = partial(init_weights, mod, std=sigma, mup_init=False)
+
+            for mod in model.modules():
+                if isinstance(mod, (LLaMAMLP, CausalSelfAttention_Scales, GptNeoxMLP)):
+                    mod.proj.reset_parameters = partial(
+                        init_weights,
+                        mod.proj,
+                        std= math.sqrt(projection_std_scale) * (1.0 / math.sqrt(d_model) / model.config.n_layer),
+                        mup_init=False,
+                    )
     else:
         fabric.print("Using standard parametrization")
 

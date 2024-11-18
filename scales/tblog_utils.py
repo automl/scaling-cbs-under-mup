@@ -19,20 +19,22 @@ def load_tb(
 ) -> pd.DataFrame:
     output_dir = Path(output_dir)
 
-    if any(["tb_log.csv" in file.name for file in output_dir.iterdir()]) and not force_reload:
-    # Return DF if logs are already parsed
-        df = pd.read_csv(output_dir / "tb_log.csv", index_col=0)
-        return df
-    
-    log_dir = output_dir / "logs"
-    reader = SummaryReader(str(log_dir))
-    
-    if "value" not in reader.scalars.columns:
-        return pd.DataFrame()
-    df = pd.pivot_table(reader.scalars, values="value", columns="tag", index="step").ffill()
+    if any(["tb_logs.csv" in file.name for file in output_dir.iterdir()]) and not force_reload:
+    # Load DF if logs are already parsed
+        df = pd.read_csv(output_dir / "tb_logs.csv", index_col=0)
+        if all(hp in df.columns for hp in hparams):
+            return df
+    else:
+        log_dir = output_dir / "logs"
+        reader = SummaryReader(str(log_dir))
+        
+        if "value" not in reader.scalars.columns:
+            df = pd.DataFrame()
+        else:
+            df = pd.pivot_table(reader.scalars, values="value", columns="tag", index="step").ffill()
 
-    if train_config_file_name is None:
-        return df
+        if train_config_file_name is None:
+            return df
 
     # Get HPs from written config file
     train_config_path = output_dir / f"{train_config_file_name}.yaml"
@@ -55,8 +57,11 @@ def read_csv_exp_group(
     exp_group_res_folder: str | Path, 
     train_config_file_name: str | None = "train_config_post_init", 
     hparams: list[str] = MODEL_HPARAMS,
-    force_reload: bool = False
+    force_reload: bool = False,
+    keep_cols: list[str] | None = None
 ) -> pd.DataFrame:
+    if keep_cols is not  None:
+        keep_cols = keep_cols + hparams + ["Train Loss", "Validation Loss"]
     exp_group_res_folder = Path(exp_group_res_folder)
     exp_paths = []
     exp_names = []
@@ -72,8 +77,13 @@ def read_csv_exp_group(
     dfs = []
     for path in exp_paths:
         df = load_tb(output_dir=path, train_config_file_name=train_config_file_name, hparams=hparams, force_reload=force_reload)
+        if keep_cols is not None:
+            drop_cols = [col for col in df.columns if col not in keep_cols]
+            df = df.drop(drop_cols, axis=1)
+        print(f"Loaded {path}")
         dfs.append(df)
 
     concat_df = pd.concat(dfs, axis=0, keys=exp_names, names=["exp_name", "step"])
+    concat_df.index = concat_df.index.set_levels(concat_df.index.levels[1].astype(int), level=1)
     # concat_df.to_csv(str(exp_group_res_folder / "concat_results.csv"))
     return concat_df
