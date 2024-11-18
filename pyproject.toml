@@ -20,6 +20,7 @@ neural-pipeline-search = {git = "https://github.com/automl/neps.git"}
 #litgpt = {path = "../litgpt", extras = ["all"], develop = true}
 #lm_eval = {path = "../lm-evaluation-harness", develop = true}
 tbparse = "^0.0.8"
+gpytorch = "^1.13"
 
 
 
