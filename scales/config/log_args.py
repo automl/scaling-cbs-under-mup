@@ -203,6 +203,42 @@ class LoggingArgs:
             self.prev_weight_spectra = sv_per_layer
 
     @should_log
+    def weight_spectra_dist_entropy(self, model: torch.nn.Module, step: int) -> None:
+        """Calculate the entropy of the singular values distribution for each layer.
+        Should be called after weight_spectra_diff to have the previous_weight_spectra available."""
+        if self.prev_weight_spectra is None:
+            sv_per_layer = weight_spectra(model)
+        else:
+            sv_per_layer = self.prev_weight_spectra
+
+        for name, sing_vals in sv_per_layer.items():
+            probs = torch.divide(sing_vals, torch.sum(sing_vals))
+            entropy = torch.distributions.Categorical(probs=probs).entropy()
+            self.writer.add_scalar(
+                tag=f"Entropy SV/{name}",
+                scalar_value=entropy,
+                global_step=step,
+            )
+    @should_log
+    def weight_spectra_dist_norm_entropy(self, model: torch.nn.Module, step: int) -> None:
+        """Calculate the normalized entropy of the singular values distribution for each layer.
+        Should be called after weight_spectra_diff to have the previous_weight_spectra available."""
+        if self.prev_weight_spectra is None:
+            sv_per_layer = weight_spectra(model)
+        else:
+            sv_per_layer = self.prev_weight_spectra
+
+        for name, sing_vals in sv_per_layer.items():
+            probs = torch.divide(sing_vals, torch.sum(sing_vals))
+            entropy = torch.distributions.Categorical(probs=probs).entropy()
+            entropy = entropy / torch.log(torch.tensor(len(probs)))
+            self.writer.add_scalar(
+                tag=f"Norm Entropy SV/{name}",
+                scalar_value=entropy,
+                global_step=step,
+            )
+
+    @should_log
     def z_loss(self, loss: float, step: int) -> None:
         self.writer.add_scalar(tag="Z Loss", scalar_value=loss, global_step=step)
 

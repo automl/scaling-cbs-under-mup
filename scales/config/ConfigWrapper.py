@@ -23,10 +23,13 @@ class ConfigWrapper(BaseConfig):
     vocab_size: int = 50257
     bias: bool = True
     apply_qk_norm: bool = False
+    parallel_residual: bool = True
     norm_class_name: Literal["LayerNorm", "RMSNorm"] = "LayerNorm"
     rotary_percentage: float = 0.25
     norm_eps: float = 1e-5
     lm_head_bias: bool = False
+    attn_residual_weight: float = 0.5
+    rec_mlp_weight: float = 0.5
     _initialized: bool = False
 
     def __post_init__(self) -> None:
@@ -38,6 +41,7 @@ class ConfigWrapper(BaseConfig):
             vocab_size=self.vocab_size,
             norm_class_name=self.norm_class_name,
             rotary_percentage=self.rotary_percentage,
+            parallel_residual=self.parallel_residual,
             norm_eps=self.norm_eps,
             bias=self.bias,
             lm_head_bias=self.lm_head_bias,

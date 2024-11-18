@@ -172,8 +172,18 @@ class TrainConfig(BaseConfig):
     """Config Path for the Config object, ignored if model_config provided."""
     model_name: str | None = None
     """Model name to load from HF hub."""
-    weight_init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek"] | None = None
+    weight_init_type: Literal["plain", "scaled", "GPT-NeoX", "DeepSeek", "HP"] | None = None
     """Model weight initialization."""
+    linear_std_scale: float = 0.4
+    """
+    Standard deviation scale for linear and embedding layer initialization.
+    Note: This is only used when weight_init_type is set to "HP".
+    """
+    projection_std_scale: float = 1.0
+    """
+    Standard deviation scale for projection layer initialization.
+    Note: This is only used when weight_init_type is set to "HP".
+    """
 
     # LR scheduler
     cooldown_fraction: float | None = None
@@ -205,6 +215,7 @@ class TrainConfig(BaseConfig):
     """Number of steps after which to validate the model."""
     z_loss_eps: float | None = None
     "Epsilon value for Z loss"
+    s_loss_eps: float | None = None
 
     # optimizer
     adam_beta_1: float = 0.9
