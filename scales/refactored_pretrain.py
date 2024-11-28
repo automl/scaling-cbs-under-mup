@@ -350,6 +350,7 @@ def train(
             logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
             states["train_tokens"] += tokens_per_step
+            logger.tokens_per_step(value=states["train_tokens"], step=states["train_steps"])
 
             train_args.lr_scheduler.step(steps=states["train_steps"] + 1, optimizer=states["optimizer"])
 

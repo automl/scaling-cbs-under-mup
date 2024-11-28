@@ -219,6 +219,7 @@ class LoggingArgs:
                 scalar_value=entropy,
                 global_step=step,
             )
+
     @should_log
     def weight_spectra_dist_norm_entropy(self, model: torch.nn.Module, step: int) -> None:
         """Calculate the normalized entropy of the singular values distribution for each layer.
@@ -249,6 +250,10 @@ class LoggingArgs:
     @should_log
     def validation_loss(self, value: float, step: int) -> None:
         self.writer.add_scalar(tag="Validation Loss", scalar_value=value, global_step=step)
+
+    @should_log
+    def tokens_per_step(self, value: int, step: int) -> None:
+        self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
 
     def close(self) -> None:
         if self.writer is not None:
