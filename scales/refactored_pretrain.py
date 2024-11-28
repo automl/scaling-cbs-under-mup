@@ -24,9 +24,9 @@ from scales.utils import (
     count_trainable_parameters_chinchilla,
     count_trainable_parameters_kaplan,
     load_checkpoint,
-    save_checkpoint,
-    norm_entropy,
     neg_partial_entropy,
+    norm_entropy,
+    save_checkpoint,
 )
 
 
@@ -62,10 +62,8 @@ def main(
     block_size = train_args.block_size
 
     fabric.print(f"Number of trainable parameters litgpt: {train_args.trainable_params:,}")
-    fabric.print(f"Number of trainable prameters Kaplan: {count_trainable_parameters_kaplan(states['model']) / 1e6} M")
-    fabric.print(
-        f"Number of trainable parameters Chinchilla: {count_trainable_parameters_chinchilla(states['model']) / 1e6} M"
-    )
+    fabric.print(f"Number of prameters Kaplan: {train_args.kaplan_params / 1e6} M")
+    fabric.print(f"Number of parameters Chinchilla: {train_args.chinchilla_params / 1e6} M")
 
     # Setting up the data with the relevant tokenizer
     data.load_data_loaders(
@@ -190,7 +188,7 @@ def init_state(
             weight_decay=train_args.true_weight_decay,
             betas=(train_args.adam_beta_1, train_args.adam_beta_2),
             eps=train_args.adam_eps,
-            decoupled_wd=False
+            decoupled_wd=False,
         )
     else:
         states["optimizer"] = torch.optim.AdamW(
@@ -308,19 +306,22 @@ def train(
             targets = targets.reshape(-1)
             loss = nn.functional.cross_entropy(logits, targets)
 
-            
-            if getattr(train_args, "z_loss_eps", None) is not None and getattr(train_args, "z_loss_eps", 0.) > 0:
+            if getattr(train_args, "z_loss_eps", None) is not None and getattr(train_args, "z_loss_eps", 0.0) > 0:
                 # implementation from
                 # https://github.com/mlfoundations/open_lm/blob/c0f131958abeab17b691930c5182cc9abe74e37b/open_lm/losses.py#L21
                 z_loss = train_args.z_loss_eps * torch.square(torch.logsumexp(logits, dim=-1)).mean()
                 loss += z_loss
 
-            if getattr(train_args, "s_loss_eps", None) is not None and getattr(train_args, "s_loss_eps", 0.) > 0:
+            if getattr(train_args, "s_loss_eps", None) is not None and getattr(train_args, "s_loss_eps", 0.0) > 0:
                 if not norm_ent_computed:
-                    layerwise_sv_norm_entropy = [norm_entropy(torch.linalg.svdvals(mod.weight.data)) 
-                                                for _, mod in states["model"].named_modules() 
-                                                if isinstance(mod, torch.nn.Linear)]
-                    init_s = torch.square(torch.tensor(layerwise_sv_norm_entropy, dtype=loss.dtype, device=loss.device)).mean()
+                    layerwise_sv_norm_entropy = [
+                        norm_entropy(torch.linalg.svdvals(mod.weight.data))
+                        for _, mod in states["model"].named_modules()
+                        if isinstance(mod, torch.nn.Linear)
+                    ]
+                    init_s = torch.square(
+                        torch.tensor(layerwise_sv_norm_entropy, dtype=loss.dtype, device=loss.device)
+                    ).mean()
                     norm_ent_computed = True
                 s_loss = train_args.s_loss_eps * (1 - init_s)
                 loss += s_loss
@@ -344,7 +345,7 @@ def train(
             logger.weight_spectra_diff(model=states["model"], step=states["train_steps"], last=last_step)
             logger.weight_spectra_dist_entropy(model=states["model"], step=states["train_steps"], last=last_step)
             logger.weight_spectra_dist_norm_entropy(model=states["model"], step=states["train_steps"], last=last_step)
-            
+
             states["optimizer"].step()
             logger.optimizer_stats(step=states["train_steps"], optimizer=states["optimizer"])
             states["optimizer"].zero_grad()
