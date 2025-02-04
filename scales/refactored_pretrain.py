@@ -188,7 +188,6 @@ def init_state(
             weight_decay=train_args.true_weight_decay,
             betas=(train_args.adam_beta_1, train_args.adam_beta_2),
             eps=train_args.adam_eps,
-            decoupled_wd=False,
         )
     else:
         states["optimizer"] = torch.optim.AdamW(
