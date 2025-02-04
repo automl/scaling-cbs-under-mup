@@ -41,8 +41,9 @@ if __name__ == "__main__":
             "optimizer_stats": 1,
             "tokens_per_step": 1,
         },
-        mup_base_shape_path="width32.bsh",
-        max_train_steps=3,
+        # mup_base_shape_path="width32.bsh",
+        mup_base_scales=32,
+        max_train_steps=100,
     )
 
     data_handler = DataHandler(
