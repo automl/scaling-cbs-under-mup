@@ -256,6 +256,12 @@ def train(
             if i == states["train_steps"] * train_args.accumulation_iters - 1:
                 break
 
+    if "activations_train" in train_args.tracked_metrics and train_args.tracked_metrics is not None:
+        activations = {}
+        for name, layer in states["model"].named_modules():
+            if len(list(layer.children())) == 0:
+                layer.register_forward_hook(l1_norm_hook(name, activations))
+
     # main training loop
     for batch in train_iterator:
         is_accumulating = (loop_iters + 1) % accumulation_iters != 0
@@ -272,6 +278,14 @@ def train(
 
         with fabric.no_backward_sync(module=states["model"], enabled=is_accumulating):
             logits = states["model"](input_ids)
+            logger.activations_train(
+                activations=activations,
+                step=states["train_steps"],
+                fabric=fabric,
+                is_accumulating=is_accumulating,
+                accumulation_iters=accumulation_iters,
+                last=last_step,
+            )
             logger.output_logits_mean(
                 logits=logits,
                 step=states["train_steps"],
@@ -392,6 +406,13 @@ def train(
                 train_args.max_val_steps,
                 last_step=last_step,
             )
+            logger.layerwise_features_rms_val(
+                states["model"].get_features(type="l2"), step=states["train_steps"], last=last_step, fabric=fabric
+            )
+            logger.layerwise_features_l1_mean_val(
+                states["model"].get_features(type="l1"), step=states["train_steps"], last=last_step, fabric=fabric
+            )
+            states["model"].clear_features()
             logger.validation_loss(val_loss, step=states["train_steps"], last=last_step)
             fabric.print(f"Validation Loss: {val_loss}")
             result["train_steps"] = states["train_steps"]
@@ -465,9 +486,17 @@ def validate(
 
         loss = nn.functional.cross_entropy(logits, targets)
         val_losses.append(loss)
+        model.update_val_steps(step)
 
     val_loss = torch.stack(val_losses).mean().detach().item()
     total_val_loss = fabric.all_reduce(torch.tensor(val_loss), reduce_op="mean")
     model.train()
     fabric.barrier()
     return total_val_loss
+
+
+def l1_norm_hook(name: str, activations: dict):
+    def forward_hook(module, input, output):
+        activations[name] = output.abs().mean().item()
+
+    return forward_hook

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
@@ -70,6 +71,7 @@ class LoggingArgs:
             self.max_attn_logit = None
             self.max_attn_logits_per_layer: list[float] = []
             self.total_logits_max = None
+            self.activation_results: list[float] = []
             self.prev_weight_spectra: None | dict = None
 
     def log_check(self, func: Callable, step: int, last: bool = False) -> bool:
@@ -254,6 +256,43 @@ class LoggingArgs:
     @should_log
     def tokens_per_step(self, value: int, step: int) -> None:
         self.writer.add_scalar(tag="Tokens-Per-Step", scalar_value=value, global_step=step)
+
+    @should_log
+    def layerwise_features_rms_val(self, features: list[float], step: int, fabric: L.Fabric) -> None:
+        current_features_devices = fabric.all_reduce(features, reduce_op="mean")
+        current_features_sqrt = [torch.sqrt(feature) for feature in current_features_devices]
+        for i, val in enumerate(current_features_sqrt):
+            self.writer.add_scalar(f"RMS Feature Learning/Validation/Feature{i}", global_step=step, scalar_value=val)
+
+    @should_log
+    def layerwise_features_l1_mean_val(self, features: list[float], step: int, fabric: L.Fabric) -> None:
+        current_features_devices = fabric.all_reduce(features, reduce_op="mean")
+        for i, val in enumerate(current_features_devices):
+            self.writer.add_scalar(
+                f"L1 Mean Feature Learning/Validation/Feature{i}", global_step=step, scalar_value=val
+            )
+
+    @should_log
+    def activations_train(
+        self, activations: list, step: int, fabric: L.Fabric, is_accumulating: bool, accumulation_iters: int
+    ) -> None:
+        continue_appending = False
+        for i, (layer_name, activation) in enumerate(activations.items()):
+            if len(self.activation_results) == 0 or continue_appending:
+                continue_appending = True
+                self.activation_results.append(activation / accumulation_iters)
+            else:
+                self.activation_results[i] += activation / accumulation_iters
+
+        if not is_accumulating:
+            reduced_activation_result = fabric.all_reduce(self.activation_results, reduce_op="mean")
+            for i, (layer_name, activation) in enumerate(activations.items()):
+                layer_name = re.sub(r".*?module", "", layer_name)
+                layer_name = layer_name.replace("module", "").lstrip(".")
+                self.writer.add_scalar(
+                    tag=f"Activations L1/{layer_name}", scalar_value=reduced_activation_result[i], global_step=step
+                )
+            self.activation_results = []
 
     def close(self) -> None:
         if self.writer is not None:
