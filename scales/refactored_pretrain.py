@@ -444,13 +444,13 @@ def validate(
     fabric.barrier()
     model.eval()
 
-    final_val_tokens = 1024 * 1024
+    # final_val_tokens = 1024 * 1024
     step = 0
     val_losses = []
-    if last_step:
-        # Validate for 2^20 tokens
-        max_val_steps = final_val_tokens // max_seq_length // val_iterator.iterable.batch_size // fabric.world_size
-        fabric.print(f"Running the final validation loop for {final_val_tokens} tokens")
+    # if last_step:
+    #     # Validate for 2^20 tokens
+    #     max_val_steps = final_val_tokens // max_seq_length // val_iterator.iterable.batch_size // fabric.world_size
+    #     fabric.print(f"Running the final validation loop for {final_val_tokens} tokens")
     if max_val_steps is None:
         max_val_steps = len(val_iterator.iterable) // fabric.world_size
     for step in range(max_val_steps):
