@@ -25,6 +25,7 @@ def search_space(
     micro_batch_size: int = 8,
     n_gpus: int = 1,
     total_validation_tokens: int = 2500000,
+    block_size: int = 1024,
 ) -> dict:
     return {
         "lr_exponent": neps.FloatParameter(lower=1, upper=5),
@@ -32,6 +33,7 @@ def search_space(
         "width": neps.ConstantParameter(value=width),
         "micro_batch_size": neps.ConstantParameter(value=micro_batch_size),
         "n_gpus": neps.ConstantParameter(value=n_gpus),
+        "block_size": neps.ConstantParameter(value=block_size),
         "total_validation_tokens": neps.ConstantParameter(value=total_validation_tokens),
     }
 
@@ -41,7 +43,9 @@ def run_pipeline(pipeline_directory: Path, **hparams: Any) -> dict[str, Any]:
 
     total_validation_steps = int(
         hparams.get("total_validation_tokens")
-        / (hparams.get("micro_batch_size") * hparams.get("n_gpus") * hparams.get("block_size"))
+        / hparams.get("micro_batch_size")
+        * hparams.get("n_gpus")
+        * hparams.get("block_size")
     )
 
     data_handler = DataHandler(
@@ -61,7 +65,7 @@ def run_pipeline(pipeline_directory: Path, **hparams: Any) -> dict[str, Any]:
         seed=SEED,
         weight_init_type="GPT-NeoX",
         micro_batch_size=hparams.get("micro_batch_size"),
-        block_size=1024,
+        block_size=hparams.get("block_size"),
         weight_decay=0.0,
         max_val_steps=total_validation_steps,
         validate_every=20,
@@ -123,6 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--width", type=int, default=96, help="Width of the GPT model")
     parser.add_argument("--micro_batch_size", type=int, default=8, help="micro batch size fit according to GPU")
     parser.add_argument("--n_gpus", type=int, default=1, help="Number of GPUs used in this setup")
+    parser.add_argument("--block_size", type=int, default=1024, help="Block Size to be used")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     set_seed(SEED)
@@ -135,7 +140,7 @@ if __name__ == "__main__":
             micro_batch_size=args.micro_batch_size,
             n_gpus=args.n_gpus,
         ),
-        root_directory=Path(__file__).parent / f"results/tune_lr_bs{effective_batch_size}_w{args.width}",
+        root_directory=Path(__file__).parent / f"result/tune_lr_w{args.width}_bs{effective_batch_size}",
         max_evaluations_total=15,
         searcher="grid_search",
         grid_step_size=15,
