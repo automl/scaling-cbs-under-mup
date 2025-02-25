@@ -193,7 +193,7 @@ def count_trainable_parameters_kaplan(model: GPT_Scales) -> int:
     return attn_proj + feedforward
 
 
-def count_trainable_parameters_chinchilla(model: GPT_Scales) -> int:
+def count_trainable_parameters_chinchilla(model: GPT_Scales | None = None, config: Config | None = None) -> int:
     """Count the number of parameters the Chinchilla approach.
     https://arxiv.org/abs/2203.15556
 
@@ -207,9 +207,16 @@ def count_trainable_parameters_chinchilla(model: GPT_Scales) -> int:
 
     """
     # TODO: verify code
-    embed = (model.config.padded_vocab_size + model.config.block_size) * model.config.n_embd
-    attn_proj = model.config.n_layer * model.config.n_embd * model.config.n_embd
-    feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
+    if model:
+        embed = (model.config.padded_vocab_size + model.config.block_size) * model.config.n_embd
+        attn_proj = model.config.n_layer * model.config.n_embd * model.config.n_embd
+        feedforward = model.config.n_layer * 2 * model.config.n_embd * model.config.intermediate_size
+    if config:
+        embed = (config.padded_vocab_size + config.block_size) * config.n_embd
+        attn_proj = config.n_layer * config.n_embd * config.n_embd
+        feedforward = config.n_layer * 2 * config.n_embd * config.intermediate_size
+    if config and model:
+        return ValueError("Please choose either `model` or `config` to perform the calculation")
 
     return embed + attn_proj + feedforward
 
@@ -237,11 +244,12 @@ def count_trainable_params_chinchilla_from_config(model_config: Config) -> int:
     return embed + attn_proj + feedforward
 
 
-def  norm_entropy(sing_vals):
+def norm_entropy(sing_vals):
     probs = torch.divide(sing_vals, torch.sum(sing_vals))
     entropy = torch.distributions.Categorical(probs=probs).entropy()
     norm_entropy = entropy / torch.log(torch.tensor(len(probs)))
     return norm_entropy
+
 
 def neg_partial_entropy(sing_vals):
     # probs = torch.divide(torch.exp(sing_vals), torch.sum(torch.exp(sing_vals)))
